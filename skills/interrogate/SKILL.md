@@ -32,7 +32,7 @@ Present a round in two steps: context as text, then the questions.
 - **Recap:** a bulleted **Settled** list of decisions so far, then a one-line **This round** naming what the round covers. Compress settled items to a few words; group or summarize older ones as the list grows. Omit **Settled** when nothing is settled yet.
 - **Per question:** a `## {N}. {Question}` heading followed by short bold-labeled sections. Use markdown emphasis to highlight the key fact or tradeoff. Omit empty sections.
   - **Now** or **Known** -- the relevant facts, with sources.
-  - **Picture** -- a small diagram or table in a fenced code block.
+  - **Picture** -- a small picture built from the rules and templates under Pictures: a markdown table, or line art in a fenced code block.
   - **Why it matters** -- the consequences and main tradeoffs, plus any assumption or uncertainty that could change the choice.
   - **Other options** -- viable options beyond the fourth, if any.
 
@@ -42,11 +42,74 @@ Present a round in two steps: context as text, then the questions.
 
 **Keep it simple and short.** Write in plain language a newcomer to the topic could follow. Define a term the first time it appears if the user may not know it. Keep sentences short. Do not assume the user remembers earlier context; restate the one fact the question hinges on.
 
-**Draw by default.** Give each question a picture whenever it involves a flow, a relationship, a data model, a layout, or a comparison: boxes and arrows, a tree, a short table, or a timeline. Keep it terminal-friendly, under about fifteen lines, and label every box. Skip it only for trivial questions where words alone are clearer.
+**Draw by default.** Give each question a picture whenever it involves a comparison, a flow, a relationship, a data model, a layout, or timing. Choose the kind and draw it by the rules under Pictures. Skip it only for trivial questions where words alone are clearer.
 
 **Give enough context to judge.** Explain why the decision matters to the user's goal and what each choice leads to in practice. Scale the detail to the decision rather than repeating the question or the recommendation.
 
 **Offer every viable answer.** Include each genuinely workable option, not just two. Always recommend one and say why in a sentence; give each alternative a sentence on when it would be the better choice. The user may answer with their own option.
+
+## Pictures
+
+Pick the kind from what the question is about:
+
+| the question is about           | draw a     |
+|---------------------------------|------------|
+| options side by side            | table      |
+| order of steps or data moving   | boxed flow |
+| what contains or owns what      | tree       |
+| when things happen              | timeline   |
+| where things sit on a screen    | layout     |
+
+Add a second picture of another kind only when both help, for example a table of the options plus a flow of the one option that is hard to imagine.
+
+**Limits.** At most 72 columns, 6 boxes, and 15 lines, for tables as well as line art. Label every box. Before sending, check that the longest row fits in 72 columns and that every vertical bar, box corner, and table pipe sits in the same column as the one above it; redraw anything that does not. Shorten cell text and labels rather than widen a picture.
+
+**Emitting.** Write a table as plain markdown, not inside a code block; every harness renders it. Put every other kind inside a fenced code block. Draw lines with `─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴` and arrowheads with `▶` and `▼`.
+
+**Templates.** Copy the shape and replace the labels.
+
+Table (emit without the fence):
+```
+| option    | what differs | cost |
+|-----------|--------------|------|
+| per clone | ...          | ...  |
+| global    | ...          | ...  |
+```
+
+Boxed flow:
+```
+┌─────────┐   ┌─────────┐  yes   ┌─────────┐
+│ step 1  │──▶│ check?  │───────▶│ outcome │
+└─────────┘   └────┬────┘        └─────────┘
+               no  │   ┌─────────┐
+                   └──▶│ step 2  │──▶ outcome
+                       └─────────┘
+```
+
+Tree:
+```
+parent
+├─ child A
+│  └─ grandchild
+└─ child B
+```
+
+Timeline:
+```
+t0  request arrives
+t1  cache checked
+t2  fetch, on a miss only
+t3  response sent
+```
+
+Layout:
+```
+┌─────────────────────────────────┐
+│ header                          │
+├──────────┬──────────────────────┤
+│ sidebar  │ main                 │
+└──────────┴──────────────────────┘
+```
 
 ## Example round
 
@@ -66,11 +129,10 @@ Context as text:
 - Two clones on one machine can sync at the same time today (README.md:81)
 
 **Picture**
-```
-  per clone                     global
-  clone A ─▶ A/.sync.lock       clone A ─┐
-  clone B ─▶ B/.sync.lock       clone B ─┴─▶ ~/.agents/.sync.lock
-```
+| option    | lock path            | who waits for whom          |
+|-----------|----------------------|-----------------------------|
+| per clone | <clone>/.sync.lock   | nobody; clones run together |
+| global    | ~/.agents/.sync.lock | every clone takes turns     |
 
 **Why it matters**
 The lock decides **which syncs wait for each other**. Per-clone locks let clones sync in parallel but leave *shared files* unprotected; a global lock makes every clone take turns.
