@@ -1,6 +1,6 @@
 interface:
   display_name: "Orchestrate"
   short_description: "Coordinate delegated work through independent verification"
-  default_prompt: "Use $orchestrate to coordinate this session: make small, clear edits directly, plan larger work through interrogate, delegate implementation, and independently verify it."
+  default_prompt: "Use $orchestrate to coordinate this session: plan the work through interrogate, delegate every change to workers, and independently verify it."
 policy:
   allow_implicit_invocation: false

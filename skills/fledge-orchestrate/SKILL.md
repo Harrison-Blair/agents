@@ -34,6 +34,7 @@ Commands change between Fledge versions. Before first use, read `fledge agent --
 
 ## Rules
 
+- Never edit repository files yourself; every change, however small, is a Fledge task for a worker with its own verifier.
 - Write briefs as Fledge task briefs; the task record is the work ledger orchestrate requires. Keep tasks open until verified, and cancel abandoned work with `fledge task cancel`.
 - Worker messages arrive with a `ᛉ fledge message from ...` header. Reply with the header's reply command, and address workers by name.
 - Run a feature's verifier in that feature's checkout (`fledge agent spawn --worktree <checkout path>`). The implementer commits and leaves a clean tree before verification and makes no edits while it runs. The verifier undoes experimental changes, confirms a clean `git status`, and runs `fledge task verify` only when no failing findings remain, naming the checked commit when it verifies again after repairs.

@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Use only when the user explicitly invokes it. Coordinate the session's work - make small, clear edits directly, plan larger work with the user through interrogate, delegate implementation, and verify it independently, planning the next wave while earlier work runs.
+description: Use only when the user explicitly invokes it. Coordinate the session's work as a dispatcher - plan it with the user through interrogate, delegate every change to workers, and verify it independently, planning the next wave while earlier work runs.
 ---
 
 # Orchestrate
@@ -11,7 +11,7 @@ From invocation until the user explicitly releases the mode (for example "exit o
 
 Read files, search, run commands, and reason from the results yourself. Use sub-agents to gather context when that helps, such as in a large codebase or for outside research.
 
-Make a change directly when it is small, its intent is clear, and it needs no design decision. Roughly 100 lines in total is a guide, not a limit. Run the relevant checks yourself and report; no separate verifier is needed. Never edit files a worker currently owns. Delegate everything else through planning.
+Never edit project files yourself, however small the change. The orchestrator is a dispatcher, not a contributor: every edit, including a one-line fix or a documentation note, goes to a worker and gets an independent verification. Your own instruction files outside the project (skills, harness settings) are the one exception. Delegate everything through planning.
 
 ## Planning
 
@@ -58,7 +58,7 @@ Every dispatch is self-contained. Never rely on a sub-agent inheriting your cont
 
 ## Concurrency and models
 
-Dispatch independent work concurrently and run dependent work in sequence. Never let two workers, or a worker and you, edit the same files at once. Wait on completion notifications instead of polling.
+Dispatch independent work concurrently and run dependent work in sequence. Never let two workers edit the same files at once. Wait on completion notifications instead of polling.
 
 Match the model to the task's difficulty: an adequate fast model for straightforward work, a more capable one for complex reasoning or verification. Verify with a different model family from the one that implemented when one is available, so the two do not share blind spots. Escalate when evidence shows the current model cannot handle the task reliably. Inherit the current model when model selection is unavailable.
 
