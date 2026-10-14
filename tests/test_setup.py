@@ -1,6 +1,6 @@
 """Filesystem regression tests: python3 -m unittest discover -s tests -v.
 
-Fixtures redirect the script's home references to SKILLS_TEST_HOME rather than
+Fixtures redirect the script's home references to AGENTS_TEST_HOME rather than
 changing HOME or touching the user's actual configuration. Windows command
 boundaries are simulated; native junction behavior needs a Git Bash smoke test.
 """
@@ -36,7 +36,7 @@ case "$3 ${4:-}" in
     : > "$state"
     awk 'BEGIN { patched = 0 }
       /^main "\$@"$/ && patched == 0 {
-        print "printf reexec >> \"$SKILLS_TEST_HOME/reexec-marker\""
+        print "printf reexec >> \"$AGENTS_TEST_HOME/reexec-marker\""
         patched = 1
       }
       { print }' "$repo/scripts/setup.sh" > "$repo/scripts/setup.new"
@@ -51,7 +51,7 @@ esac
 COUNTING_GIT = r"""#!/bin/sh
 [ "$3" = rev-parse ] && [ "$4" = --show-toplevel ] && { echo "$2"; exit 0; }
 [ "$3" = rev-parse ] && [ "$4" = HEAD ] && { echo 1111111; exit 0; }
-[ "$3" = pull ] && { printf 'pull\n' >> "$SKILLS_TEST_HOME/pulls"; exit 0; }
+[ "$3" = pull ] && { printf 'pull\n' >> "$AGENTS_TEST_HOME/pulls"; exit 0; }
 exit 1
 """
 
@@ -59,8 +59,8 @@ exit 1
 # exercised without a network. It records the URL it was asked for.
 BOOTSTRAP_GIT = r"""#!/bin/sh
 if [ "$1" = clone ]; then
-  printf '%s\n' "$2" > "$SKILLS_TEST_HOME/cloned-url"
-  cp -R "$SKILLS_FIXTURE" "$3" || exit 1
+  printf '%s\n' "$2" > "$AGENTS_TEST_HOME/cloned-url"
+  cp -R "$AGENTS_FIXTURE" "$3" || exit 1
   exit 0
 fi
 [ "$3" = rev-parse ] && [ "$4" = --show-toplevel ] && { echo "$2"; exit 0; }
@@ -70,7 +70,7 @@ exit 1
 
 class SetupTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="skills setup ")
+        self.temp = tempfile.TemporaryDirectory(prefix="agents setup ")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.repo = self.base / "repo"
@@ -82,13 +82,14 @@ class SetupTests(unittest.TestCase):
         (self.repo / "scripts").mkdir(parents=True)
         shutil.copytree(SOURCE / "hooks", self.repo / "hooks")
         shutil.copytree(SOURCE / "statusline", self.repo / "statusline")
+        shutil.copy2(SOURCE / "AGENTS.md", self.repo / "AGENTS.md")
         self.script = self.repo / "scripts/setup.sh"
         self.script.write_text(
             (SOURCE / "scripts/setup.sh").read_text().replace(
-                "$HOME", "$SKILLS_TEST_HOME"
+                "$HOME", "$AGENTS_TEST_HOME"
             )
         )
-        self.env = dict(os.environ, SKILLS_TEST_HOME=str(self.home))
+        self.env = dict(os.environ, AGENTS_TEST_HOME=str(self.home))
         # Sync exercises the real linking flow with a deterministic offline pull.
         bin_dir = self.base / "bin"
         bin_dir.mkdir()
@@ -97,7 +98,7 @@ class SetupTests(unittest.TestCase):
         git.chmod(0o755)
         self.env["PATH"] = str(bin_dir) + os.pathsep + self.env["PATH"]
         self.skill = self.add_skill(self.repo / "skills/shared-one")
-        (self.repo / "pi/skills-autopull").mkdir(parents=True)
+        (self.repo / "pi/agents-autopull").mkdir(parents=True)
         (self.repo / "pi/example-extension").mkdir(parents=True)
 
     def add_skill(self, path):
@@ -200,7 +201,7 @@ class SetupTests(unittest.TestCase):
         moved = self.base / "moved"
         self.repo.rename(moved)
         self.script = moved / "scripts/setup.sh"
-        for link in (self.shared / "shared-one", extensions / "skills-autopull"):
+        for link in (self.shared / "shared-one", extensions / "agents-autopull"):
             self.assertTrue(link.is_symlink())
             self.assertFalse(link.exists(), link)
         result = self.run_setup("--sync")
@@ -208,8 +209,8 @@ class SetupTests(unittest.TestCase):
                          (moved / "skills/shared-one").resolve())
         self.assertEqual((self.claude / "shared-one").resolve(),
                          (moved / "skills/shared-one").resolve())
-        self.assertEqual((extensions / "skills-autopull").resolve(),
-                         (moved / "pi/skills-autopull").resolve())
+        self.assertEqual((extensions / "agents-autopull").resolve(),
+                         (moved / "pi/agents-autopull").resolve())
         self.assertIn("elsewhere", result.stderr)
         self.assertIn("left untouched", result.stderr)
         self.assertEqual((self.shared / "elsewhere").readlink(), other)
@@ -342,10 +343,10 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.hook_commands(settings), [live, self.sync_command()])
         self.assertIn("another clone", result.stderr)
 
-    def status_command(self, repo=None):
+    def status_command(self, repo=None, harness="claude"):
         """The statusLine command setup.sh writes for a clone."""
-        return 'python3 "%s/statusline/statusline.py" render claude' % Path(
-            repo or self.repo).resolve()
+        return 'python3 "%s/statusline/statusline.py" render %s' % (
+            Path(repo or self.repo).resolve(), harness)
 
     def test_setup_points_both_harnesses_at_the_statusline(self):
         (self.home / ".codex").mkdir()
@@ -487,15 +488,15 @@ class SetupTests(unittest.TestCase):
         bin_dir.mkdir(parents=True)
         (bin_dir / "mine").write_text("#!/bin/sh\necho local\n")
         other = self.add_command(self.add_skill(self.base / "other/skills/x"), "theirs", "other")
-        (bin_dir / "theirs").write_text("#!/bin/sh\n# skills repo command: %s\nexec \"%s\" \"$@\"\n" % (other, other))
-        (bin_dir / "stale").write_text("#!/bin/sh\n# skills repo command: /gone/skills/x/bin/stale\nexec /gone \"$@\"\n")
+        (bin_dir / "theirs").write_text("#!/bin/sh\n# agents repo command: %s\nexec \"%s\" \"$@\"\n" % (other, other))
+        (bin_dir / "stale").write_text("#!/bin/sh\n# agents repo command: /gone/skills/x/bin/stale\nexec /gone \"$@\"\n")
         for name in ("mine", "theirs", "stale"):
             self.add_command(self.skill, name, "ours")
         result = self.run_setup()
         self.assertEqual((bin_dir / "mine").read_text(), "#!/bin/sh\necho local\n")
         self.assertIn(str(other), (bin_dir / "theirs").read_text())
-        self.assertIn(str(self.repo), (bin_dir / "stale").read_text(), "a dead clone's wrapper is taken over")
-        self.assertIn("mine exists and is not a skills command wrapper", result.stderr)
+        self.assertIn(str(self.repo.resolve()), (bin_dir / "stale").read_text(), "a dead clone's wrapper is taken over")
+        self.assertIn("mine exists and is not an agents command wrapper", result.stderr)
         self.assertIn("from another clone", result.stderr)
 
     def test_removed_commands_are_pruned_and_uninstall_removes_the_rest(self):
@@ -529,7 +530,7 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((self.claude / "shared-one").is_symlink())
         self.assertTrue((self.claude / "machine-shared").is_symlink())
         # Every folder under pi/ is linked as an extension of the same name.
-        self.assertTrue((extensions / "skills-autopull").is_symlink())
+        self.assertTrue((extensions / "agents-autopull").is_symlink())
         self.assertTrue((extensions / "example-extension").is_symlink())
         # Everything below is somebody else's and has to come through untouched.
         local = self.add_skill(self.claude / "claude-only")
@@ -540,7 +541,7 @@ class SetupTests(unittest.TestCase):
         result = self.run_setup("--uninstall")
         self.assertIn("removed:", result.stdout)
         for gone in (self.claude / "shared-one", self.shared / "shared-one",
-                     extensions / "skills-autopull", extensions / "example-extension"):
+                     extensions / "agents-autopull", extensions / "example-extension"):
             self.assertFalse(gone.is_symlink(), gone)
             self.assertFalse(gone.exists(), gone)
         self.assertTrue(self.claude.is_dir())
@@ -601,9 +602,9 @@ class SetupTests(unittest.TestCase):
 
     def run_standalone(self, script, cwd=None, clone=None):
         """Run a copy of the script that has no clone around it."""
-        env = dict(self.env, SKILLS_FIXTURE=str(self.repo))
+        env = dict(self.env, AGENTS_FIXTURE=str(self.repo))
         if clone is not None:
-            env["SKILLS_HOME"] = str(clone)
+            env["AGENTS_HOME"] = str(clone)
         git = self.base / "bin/git"
         git.write_text(BOOTSTRAP_GIT)
         git.chmod(0o755)
@@ -622,7 +623,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("cloning", result.stdout)
         self.assertEqual((self.home / "cloned-url").read_text().strip(),
-                         "https://github.com/Harrison-Blair/skills.git")
+                         "https://github.com/Harrison-Blair/agents.git")
         # The run continued inside the clone: its skills are linked and the hook
         # names the clone, not the directory the loose copy sat in.
         self.assertEqual((self.claude / "shared-one").resolve(),
@@ -688,10 +689,10 @@ cygpath() {
 }
 cmd() {
   case "$2" in
-    dir) [ "$3" = /AL ] || exit 91; cat "$SKILLS_TEST_HOME/listing" ;;
+    dir) [ "$3" = /AL ] || exit 91; cat "$AGENTS_TEST_HOME/listing" ;;
     rmdir)
       [ "$#" = 3 ] || exit 92
-      printf '%s\n' "$3" >> "$SKILLS_TEST_HOME/removed"
+      printf '%s\n' "$3" >> "$AGENTS_TEST_HOME/removed"
       rmdir "$(printf '%s' "${3#X:}" | tr '\\' '/')"
       ;;
     *) exit 93 ;;
@@ -735,7 +736,7 @@ prune_junctions "$1" "$2"
         harness.write_text(definitions + r'''
 is_windows() { return 0; }
 resolve() {
-  if [ "$1" = "$SKILLS_TEST_HOME/.claude/skills" ]; then
+  if [ "$1" = "$AGENTS_TEST_HOME/.claude/skills" ]; then
     if [ "$TEST_UNRELATED" = 1 ]; then echo /unrelated; else (cd "$AGENTS_SKILLS" && pwd -P); fi
   else
     (cd "$1" && pwd -P)
@@ -747,8 +748,8 @@ cmd() {
     dir) echo skills ;;
     rmdir)
       [ "$#" = 3 ] || exit 91
-      [ "$3" = "$SKILLS_TEST_HOME/.claude/skills" ] || exit 92
-      echo removal > "$SKILLS_TEST_HOME/removal"
+      [ "$3" = "$AGENTS_TEST_HOME/.claude/skills" ] || exit 92
+      echo removal > "$AGENTS_TEST_HOME/removal"
       [ "$TEST_FAIL_REMOVAL" = 0 ] || return 1
       rmdir "$3"
       ;;
@@ -789,6 +790,582 @@ link_claude_skills
         self.assertIn("left untouched", result.stderr)
         self.assertFalse((self.home / "removal").exists())
         self.assertEqual(list(self.claude.iterdir()), [])
+
+    # --- AGENTS.md linking ------------------------------------------------
+
+    def agents_paths(self):
+        """The shared AGENTS.md entry and the three harness files that use it."""
+        shared = self.home / ".agents/AGENTS.md"
+        return shared, [self.home / ".claude/CLAUDE.md", self.home / ".codex/AGENTS.md",
+                        self.home / ".pi/agent/AGENTS.md"]
+
+    def add_harnesses(self):
+        (self.home / ".codex").mkdir(exist_ok=True)
+        (self.home / ".pi/agent").mkdir(parents=True, exist_ok=True)
+
+    def assert_agents_linked(self, repo=None):
+        repo = Path(repo or self.repo)
+        shared, downstream = self.agents_paths()
+        self.assertEqual(shared.readlink(), repo.resolve() / "AGENTS.md")
+        for path in downstream:
+            self.assertEqual(path.readlink(), shared, path)
+            self.assertEqual(path.read_text(), (repo / "AGENTS.md").read_text())
+
+    def marked_copy(self, repo):
+        """A managed copy of the tracked AGENTS.md written for a clone."""
+        first, rest = (SOURCE / "AGENTS.md").read_text().split("\n", 1)
+        return first.replace("<clone>", str(repo)) + "\n" + rest
+
+    def snapshot(self, path):
+        if path.is_symlink():
+            return ("link", os.readlink(path))
+        if path.is_dir():
+            return ("dir",)
+        return ("file", path.read_bytes())
+
+    def test_tracked_agents_md_carries_the_marker(self):
+        first = (SOURCE / "AGENTS.md").read_text().split("\n", 1)[0]
+        self.assertEqual(first, "<!-- Managed by the agents repository: <clone>/AGENTS.md. "
+                                "Edit it there; this copy is rewritten at sync. -->")
+
+    def test_setup_links_agents_md_into_every_harness(self):
+        self.add_harnesses()
+        self.run_setup()
+        self.assert_agents_linked()
+        result = self.run_setup("--sync")
+        self.assertEqual(result.stderr, "")
+        self.assert_agents_linked()
+
+    def test_agents_md_is_not_linked_for_a_missing_harness(self):
+        self.run_setup()
+        self.assertTrue((self.home / ".claude/CLAUDE.md").is_symlink())
+        self.assertFalse((self.home / ".codex").exists())
+        self.assertFalse((self.home / ".pi").exists())
+
+    def test_a_real_claude_md_survives_with_one_warning(self):
+        self.add_harnesses()
+        claude_md = self.home / ".claude/CLAUDE.md"
+        claude_md.write_text("my own instructions\n")
+        for mode in ("setup", "--force", "--sync"):
+            with self.subTest(mode=mode):
+                result = self.run_setup(mode)
+                self.assertEqual(claude_md.read_text(), "my own instructions\n")
+                self.assertFalse(claude_md.is_symlink())
+                self.assertEqual(result.stderr.count(str(claude_md)), 1, result.stderr)
+        self.assertTrue((self.home / ".codex/AGENTS.md").is_symlink())
+        self.run_setup("--uninstall")
+        self.assertEqual(claude_md.read_text(), "my own instructions\n")
+
+    def test_dangling_agents_md_links_are_relinked(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        shared.symlink_to(self.base / "gone/AGENTS.md")
+        downstream[1].symlink_to(self.base / "gone/AGENTS.md")
+        result = self.run_setup()
+        self.assertIn("relinked: %s" % shared, result.stdout)
+        self.assertIn("relinked: %s" % downstream[1], result.stdout)
+        self.assert_agents_linked()
+
+    def test_unowned_shared_entry_blocks_every_harness_file(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        unrelated = self.base / "unrelated.md"
+        unrelated.write_text("not this repo's\n")
+        other = self.base / "other-clone"
+        (other / "scripts").mkdir(parents=True)
+        cases = {
+            "link elsewhere": lambda: shared.symlink_to(unrelated),
+            "real file": lambda: shared.write_text("hand written\n"),
+            "empty file": lambda: shared.write_text(""),
+            "directory": lambda: shared.mkdir(),
+            "another live clone's copy": lambda: shared.write_text(self.marked_copy(other)),
+        }
+        for name, make in cases.items():
+            with self.subTest(case=name):
+                make()
+                before = self.snapshot(shared)
+                result = self.run_setup()
+                self.assertEqual(self.snapshot(shared), before)
+                self.assertEqual(result.stderr.count("warn:"), 1, result.stderr)
+                self.assertIn(str(shared), result.stderr)
+                for path in downstream:
+                    self.assertFalse(path.exists() or path.is_symlink(), path)
+                self.run_setup("--uninstall")
+                self.assertEqual(self.snapshot(shared), before)
+                if shared.is_dir() and not shared.is_symlink():
+                    shared.rmdir()
+                else:
+                    shared.unlink()
+        self.assertEqual(unrelated.read_text(), "not this repo's\n")
+
+    def test_harness_link_elsewhere_is_left_with_a_warning(self):
+        self.add_harnesses()
+        _, downstream = self.agents_paths()
+        unrelated = self.base / "unrelated.md"
+        unrelated.write_text("mine\n")
+        downstream[2].symlink_to(unrelated)
+        result = self.run_setup()
+        self.assertEqual(downstream[2].readlink(), unrelated)
+        self.assertIn(str(downstream[2]), result.stderr)
+        self.assertTrue(downstream[0].is_symlink())
+        self.run_setup("--uninstall")
+        self.assertEqual(downstream[2].readlink(), unrelated)
+
+    def test_marked_copies_of_this_or_a_dead_clone_become_links(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        for owner in (self.repo.resolve(), self.base / "dead-clone"):
+            with self.subTest(owner=owner):
+                for path in (shared, *downstream):
+                    path.write_text(self.marked_copy(owner))
+                self.run_setup()
+                self.assert_agents_linked()
+                for path in (shared, *downstream):
+                    path.unlink()
+
+    def test_two_live_clones_uninstall_only_their_own(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        other = self.base / "other-clone"
+        shutil.copytree(self.repo, other, symlinks=True)
+        with (other / "AGENTS.md").open("a") as handle:
+            handle.write("other\n")
+        # The other clone, set up first, owns the shared entry.
+        subprocess.run(["bash", str(other / "scripts/setup.sh")], env=self.env,
+                       check=True, capture_output=True)
+        result = self.run_setup()
+        self.assertIn(str(shared), result.stderr)
+        self.assert_agents_linked(other)
+        self.run_setup("--uninstall")
+        self.assert_agents_linked(other)
+        # The owner's own uninstall takes all four away.
+        subprocess.run(["bash", str(other / "scripts/setup.sh"), "--uninstall"],
+                       env=self.env, check=True, capture_output=True)
+        for path in (shared, *downstream):
+            self.assertFalse(path.exists() or path.is_symlink(), path)
+
+    def run_copy_fallback(self, ln_body="return 1"):
+        """Run the AGENTS.md step as on Windows where `ln -s` cannot link."""
+        definitions = self.script.read_text().split('\nmain "$@"')[0]
+        harness = self.repo / "scripts/windows-copy.sh"
+        harness.write_text(definitions + '''
+is_windows() { return 0; }
+ln() { %s; }
+REPO="$1"
+link_agents_md
+''' % ln_body)
+        return subprocess.run(["bash", str(harness), str(self.repo.resolve())],
+                              env=self.env, text=True, capture_output=True)
+
+    def test_windows_copy_fallback_writes_and_refreshes_marked_copies(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        tracked = (self.repo / "AGENTS.md").read_text()
+        # Git Bash's default `ln -s` silently copies instead of failing.
+        for ln_body in ("return 1", 'cp "$2" "$3"'):
+            with self.subTest(ln=ln_body):
+                (self.repo / "AGENTS.md").write_text(tracked)
+                result = self.run_copy_fallback(ln_body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr.count("warn:"), 4, result.stderr)
+                for path in (shared, *downstream):
+                    self.assertFalse(path.is_symlink(), path)
+                    self.assertEqual(path.read_text(), self.marked_copy(self.repo.resolve()))
+                # Unchanged content: nothing written, nothing said.
+                self.assertEqual(self.run_copy_fallback(ln_body).stderr, "")
+                # A content update refreshes every copy.
+                with (self.repo / "AGENTS.md").open("a") as handle:
+                    handle.write("new rule\n")
+                result = self.run_copy_fallback(ln_body)
+                self.assertEqual(result.stderr.count("warn:"), 4, result.stderr)
+                for path in (shared, *downstream):
+                    self.assertTrue(path.read_text().endswith("new rule\n"), path)
+                # Uninstall removes copies naming this clone.
+                self.run_setup("--uninstall")
+                for path in (shared, *downstream):
+                    self.assertFalse(path.exists(), path)
+        # Once a link can be made again, it replaces the copies.
+        self.run_copy_fallback()
+        self.run_setup("--sync")
+        self.assert_agents_linked()
+
+    # --- Cursor hook and status line ---------------------------------------
+
+    HERDR = {"command": "bash '/home/x/.cursor/herdr-agent-state.sh' session"}
+
+    def cursor_entry(self, repo=None):
+        return {"command": self.sync_command(repo), "timeout": 30}
+
+    def cursor_status(self, repo=None):
+        return {"type": "command", "command": self.status_command(repo, "cursor")}
+
+    def test_cursor_hook_is_created_beside_a_foreign_entry(self):
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        hooks = cursor / "hooks.json"
+        self.run_setup("--sync")
+        self.assertEqual(json.loads(hooks.read_text()),
+                         {"version": 1, "hooks": {"sessionStart": [self.cursor_entry()]}})
+        hooks.write_text(json.dumps({"hooks": {"sessionStart": [self.HERDR]},
+                                     "version": 1, "extra": {"keep": True}}))
+        hooks.chmod(0o640)
+        self.run_setup("--sync")
+        data = json.loads(hooks.read_text())
+        self.assertEqual(data["hooks"]["sessionStart"], [self.HERDR, self.cursor_entry()])
+        self.assertEqual(data["extra"], {"keep": True})
+        self.assertEqual(hooks.stat().st_mode & 0o777, 0o640)
+        first = hooks.read_bytes()
+        self.run_setup("--sync")
+        self.assertEqual(hooks.read_bytes(), first)
+        self.run_setup("--uninstall")
+        self.assertEqual(json.loads(hooks.read_text())["hooks"]["sessionStart"], [self.HERDR])
+
+    def test_cursor_hook_rewrites_ours_drops_dead_and_keeps_live_clones(self):
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        other = self.base / "other-clone"
+        (other / "scripts").mkdir(parents=True)
+        live = {"command": self.sync_command(other), "timeout": 30}
+        retired = {"command": 'sh "/gone/statuslines/scripts/setup.sh" --sync --hook=statuslines'}
+        hooks = cursor / "hooks.json"
+        hooks.write_text(json.dumps({"version": 1, "hooks": {
+            "sessionStart": [{"command": self.sync_command(), "timeout": 5}, self.HERDR,
+                             {"command": self.sync_command(self.base / "gone")}, live,
+                             retired],
+            "stop": [{"command": "echo stop"}]}}))
+        result = self.run_setup("--sync")
+        self.assertIn("another clone", result.stderr)
+        data = json.loads(hooks.read_text())
+        self.assertEqual(data["hooks"]["sessionStart"],
+                         [self.cursor_entry(), self.HERDR, live])
+        self.assertEqual(data["hooks"]["stop"], [{"command": "echo stop"}])
+
+    def test_unusable_cursor_hook_files_are_untouched_and_the_entry_printed(self):
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        hooks = cursor / "hooks.json"
+        for content in ("{", "[1]", '{"hooks": []}', '{"hooks": {"sessionStart": {}}}'):
+            for mode in ("--sync", "--uninstall"):
+                with self.subTest(content=content, mode=mode):
+                    hooks.write_text(content)
+                    result = self.run_setup(mode)
+                    self.assertEqual(hooks.read_text(), content)
+                    self.assertIn(str(self.repo.resolve()), result.stderr)
+                    self.assertIn("by hand", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(list(cursor.glob(".hooks-*")), [])
+
+    def test_unusable_claude_hook_file_prints_the_entry(self):
+        settings = self.claude.parent / "settings.json"
+        settings.write_text("{")
+        result = self.run_setup("--sync")
+        self.assertEqual(settings.read_text(), "{")
+        self.assertIn(json.dumps(self.sync_command())[1:-1], result.stderr)
+
+    def test_no_cursor_directory_means_no_cursor_files(self):
+        self.run_setup()
+        self.assertFalse((self.home / ".cursor").exists())
+
+    def test_cursor_statusline_policy(self):
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        config = cursor / "cli-config.json"
+        self.run_setup("--sync")
+        self.assertEqual(json.loads(config.read_text()), {"statusLine": self.cursor_status()})
+        for command in (self.status_command(self.base / "old", "cursor"),
+                        self.status_command(self.base / "old", "claude")):
+            with self.subTest(command=command):
+                config.write_text(json.dumps({"version": 1, "editor": {"vimMode": False},
+                                              "statusLine": {"type": "command",
+                                                             "command": command}}))
+                config.chmod(0o600)
+                self.run_setup("--sync")
+                data = json.loads(config.read_text())
+                self.assertEqual(data, {"version": 1, "editor": {"vimMode": False},
+                                        "statusLine": self.cursor_status()})
+                self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        custom = {"type": "command", "command": "my-line"}
+        config.write_text(json.dumps({"statusLine": custom}))
+        result = self.run_setup("--sync")
+        self.assertIn("custom statusLine", result.stderr)
+        self.assertEqual(json.loads(config.read_text())["statusLine"], custom)
+        self.run_setup("--force")
+        self.assertEqual(json.loads(config.read_text())["statusLine"], self.cursor_status())
+        config.write_text(json.dumps({"version": 1, "statusLine": self.cursor_status()}))
+        self.run_setup("--uninstall")
+        self.assertEqual(json.loads(config.read_text()), {"version": 1})
+        config.write_text(json.dumps({"statusLine": custom}))
+        self.run_setup("--uninstall")
+        self.assertEqual(json.loads(config.read_text())["statusLine"], custom)
+
+    def test_malformed_cursor_config_is_untouched_and_the_entry_printed(self):
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        config = cursor / "cli-config.json"
+        for content in ("{", "[]"):
+            with self.subTest(content=content):
+                config.write_text(content)
+                result = self.run_setup("--sync")
+                self.assertEqual(config.read_text(), content)
+                self.assertIn('"statusLine"', result.stderr)
+                self.assertIn("render cursor", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    # --- Rename and migration ----------------------------------------------
+
+    def test_old_marker_wrappers_are_taken_over(self):
+        bin_dir = self.home / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        # The pre-rename script recorded the physical path, as pwd -P gives it.
+        mine = self.add_command(self.skill, "hello", "hi").resolve()
+        old = "#!/bin/sh\n# skills repo command: %s\nexec \"%s\" \"$@\"\n" % (mine, mine)
+        (bin_dir / "hello").write_text(old)
+        result = self.run_setup()
+        self.assertNotIn("hello", result.stderr)
+        self.assertEqual((bin_dir / "hello").read_text().splitlines()[1],
+                         "# agents repo command: %s" % mine)
+        (bin_dir / "hello").write_text(old)
+        self.run_setup("--uninstall")
+        self.assertFalse((bin_dir / "hello").exists())
+
+    def test_old_reexec_flag_hands_its_lock_to_the_new_script(self):
+        git = self.base / "bin/git"
+        git.write_text(COUNTING_GIT)
+        git.chmod(0o755)
+        # What the pre-rename script does after a pull moved HEAD: it holds the
+        # lock, exports its own flag, and execs the freshly pulled file.
+        old = self.base / "old-setup.sh"
+        old.write_text('mkdir "$1/.sync.lock" || exit 1\nexport SKILLS_SYNC_REEXEC=1\n'
+                       'exec sh "$1/scripts/setup.sh" --sync\n')
+        result = subprocess.run(["sh", str(old), str(self.repo)], env=self.env,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_shared_link()
+        self.assertFalse((self.home / "pulls").exists(), "the new script pulled again")
+        self.assertFalse((self.repo / ".sync.lock").exists())
+
+    def test_pi_links_are_renamed_and_dead_ones_pruned(self):
+        extensions = self.home / ".pi/agent/extensions"
+        extensions.mkdir(parents=True)
+        old = extensions / "old-extension"
+        old.symlink_to(self.repo.resolve() / "pi/old-extension")
+        foreign = extensions / "foreign"
+        foreign.symlink_to(self.base / "missing")
+        result = self.run_setup()
+        self.assertIn("pruned: old-extension", result.stdout)
+        self.assertFalse(old.is_symlink())
+        self.assertTrue(foreign.is_symlink())
+        self.assertEqual((extensions / "agents-autopull").resolve(),
+                         (self.repo / "pi/agents-autopull").resolve())
+        # Uninstall takes every link into this clone's pi/, whatever its name.
+        old.symlink_to(self.repo.resolve() / "pi/old-extension")
+        self.run_setup("--uninstall")
+        self.assertEqual(sorted(p.name for p in extensions.iterdir()), ["foreign"])
+
+    def test_bootstrap_honours_an_empty_or_spaced_agents_home(self):
+        loose = self.base / "loose/setup.sh"
+        loose.parent.mkdir()
+        shutil.copy2(self.script, loose)
+        for clone, expected in (("", self.home / "source/agents"),
+                                (self.base / "my clone", self.base / "my clone")):
+            with self.subTest(clone=clone):
+                result = self.run_standalone(loose, clone=clone)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("cloning", result.stdout)
+                self.assertTrue((expected / "scripts/setup.sh").is_file())
+                self.assertEqual(self.hook_commands(self.claude.parent / "settings.json"),
+                                 [self.sync_command(expected)])
+                subprocess.run(["sh", str(expected / "scripts/setup.sh"), "--uninstall"],
+                               env=self.env, check=True, capture_output=True)
+
+    def test_renamed_clone_moves_every_hook_and_link(self):
+        self.add_harnesses()
+        (self.home / ".cursor").mkdir()
+        self.run_setup()
+        moved = self.base / "moved"
+        self.repo.rename(moved)
+        self.script = moved / "scripts/setup.sh"
+        result = self.run_setup("--sync")
+        self.assertEqual(result.stderr, "")
+        for path in (self.claude.parent / "settings.json", self.home / ".codex/hooks.json"):
+            self.assertEqual(self.hook_commands(path), [self.sync_command(moved)])
+        self.assertEqual(json.loads((self.home / ".cursor/hooks.json").read_text())
+                         ["hooks"]["sessionStart"], [self.cursor_entry(moved)])
+        self.assertEqual(json.loads((self.home / ".cursor/cli-config.json").read_text())
+                         ["statusLine"], self.cursor_status(moved))
+        self.assert_agents_linked(moved)
+
+    def home_state(self):
+        """Every file and link under the fixture home, with its content."""
+        state = {}
+        for path in sorted(self.home.rglob("*")):
+            if path.is_symlink():
+                state[str(path)] = ("link", os.readlink(path))
+            elif path.is_file():
+                state[str(path)] = ("file", path.read_bytes())
+        return state
+
+    def test_full_setup_repeat_and_uninstall(self):
+        self.add_harnesses()
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        local = {"matcher": "startup", "hooks": [{"type": "command", "command": "echo local"}]}
+        (self.claude.parent / "settings.json").write_text(json.dumps(
+            {"hooks": {"SessionStart": [local]}, "custom": "keep"}))
+        (self.home / ".codex/hooks.json").write_text(json.dumps(
+            {"hooks": {"SessionStart": [local]}}))
+        (cursor / "hooks.json").write_text(json.dumps(
+            {"hooks": {"sessionStart": [self.HERDR]}, "version": 1}))
+        (cursor / "cli-config.json").write_text(json.dumps({"version": 1, "editor": {}}))
+        before = self.home_state()
+        self.run_setup()
+        self.assert_agents_linked()
+        self.assertEqual(json.loads((cursor / "hooks.json").read_text())["hooks"]
+                         ["sessionStart"], [self.HERDR, self.cursor_entry()])
+        self.assertEqual(json.loads((cursor / "cli-config.json").read_text())["statusLine"],
+                         self.cursor_status())
+        installed = self.home_state()
+        result = self.run_setup()
+        self.assertEqual(self.home_state(), installed)
+        self.assertEqual(result.stderr, "")
+        for word in ("updated:", "relinked:", "removed:", "pruned:"):
+            self.assertNotIn(word, result.stdout)
+        self.run_setup("--uninstall")
+        after = self.home_state()
+        # Codex keeps its [tui].status_line by design.
+        after.pop(str(self.home / ".codex/config.toml"))
+
+        def parsed(state):
+            return {k: (json.loads(v[1]) if k.endswith(".json") else v)
+                    for k, v in state.items()}
+        self.assertEqual(parsed(after), parsed(before))
+
+    def test_unwritable_harness_dirs_warn_once_per_write_and_change_nothing(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        (self.home / ".cursor").mkdir()
+        claude, cursor = self.home / ".claude", self.home / ".cursor"
+        targets = [claude / "settings.json", cursor / "hooks.json",
+                   cursor / "cli-config.json"]
+        # settings.json is written by the hook merge and by the statusLine
+        # writer, so it gets one warning from each; the others get one.
+        expected = {str(claude / "settings.json"): 2, str(cursor / "hooks.json"): 1,
+                    str(cursor / "cli-config.json"): 1}
+
+        def locked_run(mode):
+            for directory in (claude, cursor):
+                directory.chmod(0o555)
+                self.addCleanup(directory.chmod, 0o755)
+            before = {t: t.read_bytes() for t in targets}
+            result = self.run_setup(mode)
+            for directory in (claude, cursor):
+                directory.chmod(0o755)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertEqual({t: t.read_bytes() for t in targets}, before)
+            warns = [l for l in result.stderr.splitlines()
+                     if l.startswith("warn: cannot write ")]
+            for path, count in expected.items():
+                self.assertEqual(
+                    len([l for l in warns if l.startswith("warn: cannot write %s: " % path)]),
+                    count, result.stderr)
+            self.assertEqual(len(warns), sum(expected.values()), result.stderr)
+
+        self.run_setup()
+        locked_run("--uninstall")
+        for target, text in zip(targets, ('{"custom": "keep"}\n', '{"version": 1}\n', "{}\n")):
+            target.write_text(text)
+        locked_run("--sync")
+
+    def test_empty_config_files_count_as_missing_and_malformed_ones_are_left(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".cursor").mkdir()
+        files = [self.home / ".claude/settings.json", self.home / ".codex/hooks.json",
+                 self.home / ".cursor/hooks.json", self.home / ".cursor/cli-config.json"]
+        for path in files:
+            path.write_bytes(b"")
+        result = self.run_setup()
+        self.assertNotIn("warn: ", result.stderr)
+        keys = [{"hooks", "statusLine"}, {"hooks"}, {"version", "hooks"}, {"statusLine"}]
+        for path, expected in zip(files, keys):
+            data = json.loads(path.read_text())
+            self.assertEqual(set(data), expected, path)
+            if "hooks" in expected:
+                self.assertIn(json.dumps(self.sync_command())[1:-1], path.read_text())
+        for path in files:
+            path.write_bytes(b"{")
+        result = self.run_setup()
+        for path in files:
+            self.assertEqual(path.read_bytes(), b"{")
+            self.assertIn("warn: %s is not" % path, result.stderr)
+        self.assertIn("add this to it by hand", result.stderr)
+
+
+    def test_unreadable_config_paths_warn_and_are_left_alone(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".cursor").mkdir()
+        claude, codex, cursor = (self.home / d for d in (".claude", ".codex", ".cursor"))
+        # path -> (hook merge reads it, statusLine reader reads it)
+        files = {claude / "settings.json": (True, True), codex / "hooks.json": (True, True),  # statusLine pass drops the retired hook
+                 cursor / "hooks.json": (True, False), cursor / "cli-config.json": (False, True)}
+        root = os.geteuid() == 0
+        for kind in ("directory", "unreadable", "dangling"):
+            if kind == "unreadable" and root:
+                continue
+            for mode in ("setup", "--sync"):
+                with self.subTest(kind=kind, mode=mode):
+                    for path in files:
+                        if path.is_symlink() or path.is_file():
+                            path.chmod(0o644) if path.is_file() else None
+                            path.unlink()
+                        elif path.is_dir():
+                            shutil.rmtree(path)
+                    for path in files:
+                        if kind == "directory":
+                            path.mkdir()
+                            (path / "keep").write_text("inside\n")
+                        elif kind == "unreadable":
+                            path.write_text("{}\n")
+                            path.chmod(0)
+                        else:
+                            path.symlink_to(self.base / "gone.json")
+                    snapshot = {p: (os.readlink(p) if p.is_symlink() else None) for p in files}
+                    try:
+                        result = self.run_setup(mode)
+                    finally:
+                        modes = {p: p.stat().st_mode & 0o777 for p in files if p.is_file()}
+                        for path in modes:
+                            path.chmod(0o644)
+                    self.assertNotIn("Traceback", result.stderr)
+                    for path, (hooks, status) in files.items():
+                        line = ("warn: %s is a dangling link; " % path
+                                if kind == "dangling" else "warn: cannot read %s: " % path)
+                        count = int(hooks) + int(status)
+                        self.assertEqual(
+                            len([l for l in result.stderr.splitlines() if l.startswith(line)]),
+                            count, (path, result.stderr))
+                        if kind == "dangling":
+                            self.assertTrue(path.is_symlink())
+                            self.assertEqual(os.readlink(path), snapshot[path])
+                            self.assertFalse(path.exists())
+                        elif kind == "directory":
+                            self.assertTrue(path.is_dir())
+                            self.assertEqual([c.name for c in path.iterdir()], ["keep"])
+                        else:
+                            self.assertEqual(modes[path], 0)
+                            self.assertEqual(path.read_text(), "{}\n")
+                    self.assertIn("add this to it by hand", result.stderr)
+                    self.assertIn('"statusLine"', result.stderr)
+
+    def test_dangling_codex_config_toml_is_left_alone(self):
+        (self.home / ".codex").mkdir()
+        toml = self.home / ".codex/config.toml"
+        toml.symlink_to(self.base / "gone.toml")
+        result = self.run_setup()
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("warn: Codex status line not synced", result.stderr)
+        self.assertTrue(toml.is_symlink())
+        self.assertFalse(toml.exists())
+        self.assertEqual(toml.readlink(), self.base / "gone.toml")
 
 
 if __name__ == "__main__":

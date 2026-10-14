@@ -2,28 +2,36 @@
 # Wire this clone into the local machine, or (--sync) pull and reconcile.
 #
 #   scripts/setup.sh              one-time setup after clone
-#   scripts/setup.sh --force      setup, also replacing a custom Claude statusLine
+#   scripts/setup.sh --force      setup, also replacing a custom Claude or Cursor
+#                                 statusLine
 #   scripts/setup.sh --sync       what the session-start hooks run: pull,
 #                                 re-link, and re-merge the hook entries
 #   scripts/setup.sh --uninstall  remove the links and hook entries this clone
 #                                 installed, leaving the clone itself alone
 #
 # With no clone around it -- piped from curl, or a lone downloaded copy -- the
-# script first clones the repo to ${SKILLS_HOME:-~/source/skills} and hands the
+# script first clones the repo to ${AGENTS_HOME:-~/source/agents} and hands the
 # run over to that copy, so the hook it installs names a path that keeps working.
 #
 # Skills are linked one by one into ~/.agents/skills so machine-local skills can
-# live beside them. Hooks are merged into existing config files, never replaced.
+# live beside them, and AGENTS.md is linked into ~/.agents and each harness.
+# Hooks are merged into existing config files, never replaced.
 # Every statement lives in a function and the file ends with one `main "$@"`, so
 # the shell parses the whole script before a pull can replace it on disk.
 set -u
 
-REPO_URL="https://github.com/Harrison-Blair/skills.git"
+REPO_URL="https://github.com/Harrison-Blair/agents.git"
 AGENTS_SKILLS="$HOME/.agents/skills"
 # Wrappers for commands skills ship in skills/<name>/bin/, so every harness can
 # run them by the same bare name.
 BIN_DIR="$HOME/.local/bin"
-WRAPPER_MARK="# skills repo command:"
+WRAPPER_MARK="# agents repo command:"
+# The marker wrappers carried before the repo was renamed; still ours.
+OLD_WRAPPER_MARK="# skills repo command:"
+# The shared instructions every harness file links to, and the fixed start of
+# the first line of a copy written where no link can be made (see link_file).
+AGENTS_MD="$HOME/.agents/AGENTS.md"
+MANAGED_MARK="<!-- Managed by the agents repository: "
 # Directory holding this script's clone, empty when the script has no file to
 # sit next to: piped into a shell, $0 is the shell's own name and `dirname` of
 # it would silently point at whatever happens to be above the current directory.
@@ -211,14 +219,184 @@ link_claude_skills() {
   done
 }
 
-# Every folder under pi/ is a Pi extension, linked under its own name.
+# Every folder under pi/ is a Pi extension, linked under its own name. A link
+# into this clone's pi/ whose target is gone -- an extension removed or renamed
+# -- is pruned.
 link_pi() {
+  local dir="$HOME/.pi/agent/extensions" ext
   [ -d "$HOME/.pi/agent" ] || { echo "skip: ~/.pi/agent not found (Pi)"; return 0; }
-  mkdir -p "$HOME/.pi/agent/extensions"
+  mkdir -p "$dir"
   for ext in "$REPO"/pi/*/; do
     [ -d "$ext" ] || continue
-    link_dir "$HOME/.pi/agent/extensions/$(basename "$ext")" "${ext%/}"
+    link_dir "$dir/$(basename "$ext")" "${ext%/}"
   done
+  if is_windows; then
+    prune_junctions "$dir" "$REPO/pi"
+    return 0
+  fi
+  for ext in "$dir"/*; do
+    [ -L "$ext" ] || continue
+    case "$(readlink "$ext")" in
+      "$REPO"/pi/*) [ -e "$ext" ] || { rm "$ext"; echo "pruned: $(basename "$ext")"; } ;;
+    esac
+  done
+}
+
+# Physical path of a file, following every link in a chain; fails on a loop or
+# a missing directory along the way.
+resolve_file() {
+  local path="$1" hops=0 target dir
+  while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    target="$(readlink "$path")"
+    case "$target" in
+      /*) path="$target" ;;
+      *) path="$(dirname "$path")/$target" ;;
+    esac
+  done
+  dir="$(resolve "$(dirname "$path")")" || return 1
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+# copy_owner FILE: the clone a managed AGENTS.md copy names, else nothing. Only
+# a regular file is read, and only its start, so a FIFO or a huge file in the
+# way cannot stall a session.
+copy_owner() {
+  local line
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  line="$(head -c 4096 "$1" 2>/dev/null | head -n 1)"
+  case "$line" in
+    "$MANAGED_MARK"*"/AGENTS.md. Edit it there"*) ;;
+    *) return 0 ;;
+  esac
+  line="${line#"$MANAGED_MARK"}"
+  printf '%s\n' "${line%%/AGENTS.md. Edit it there*}"
+}
+
+# The copy written where a link cannot be: the tracked AGENTS.md with its
+# placeholder marker line naming this clone.
+managed_copy() {
+  printf '%s%s/AGENTS.md. Edit it there; this copy is rewritten at sync. -->\n' \
+    "$MANAGED_MARK" "$REPO"
+  tail -n +2 "$REPO/AGENTS.md"
+}
+
+# make_file_link LINK TARGET: put a symlink at LINK, replacing whatever is
+# there in one rename. On Windows a real symlink needs nativestrict -- Git
+# Bash's default `ln -s` silently copies -- and the result is checked.
+make_file_link() {
+  local link="$1" target="$2" temp
+  temp="$(dirname "$link")/.$(basename "$link").$$"
+  if is_windows; then
+    MSYS=winsymlinks:nativestrict ln -s "$target" "$temp" 2>/dev/null
+  else
+    ln -s "$target" "$temp"
+  fi
+  if [ -L "$temp" ]; then
+    mv -f "$temp" "$link" && return 0
+  fi
+  rm -f "$temp"
+  return 1
+}
+
+# write_copy LINK: write this clone's managed copy at LINK when it differs.
+write_copy() {
+  local link="$1" temp
+  managed_copy | cmp -s - "$link" && return 0
+  temp="$(dirname "$link")/.$(basename "$link").$$"
+  if ! { managed_copy > "$temp" && mv -f "$temp" "$link"; }; then
+    rm -f "$temp"
+    return 1
+  fi
+  echo "warn: could not create a symlink at $link; wrote a managed copy instead" \
+    "(Developer Mode or admin rights allow a link)" >&2
+}
+
+# link_file LINK TARGET: the one place that decides an AGENTS.md path. A link
+# to TARGET stays; a dangling link is replaced; a copy this clone (or a clone
+# that no longer exists) wrote becomes a link, or on Windows, where a link may
+# be impossible, is refreshed. Anything else -- a live link elsewhere, a file
+# without the marker, another live clone's copy, a directory -- is left with a
+# warning and a non-zero status.
+link_file() {
+  local link="$1" target="$2" owner
+  if [ -L "$link" ]; then
+    if [ -e "$link" ]; then
+      [ "$(resolve_file "$link")" = "$(resolve_file "$target")" ] && return 0
+      echo "warn: $link links elsewhere; left untouched" >&2
+      return 1
+    fi
+    rm "$link" || { echo "warn: could not remove dangling link $link" >&2; return 1; }
+    echo "relinked: $link"
+  elif [ -e "$link" ]; then
+    owner="$(copy_owner "$link")"
+    if [ -z "$owner" ]; then
+      echo "warn: $link exists and is not managed by this repo; left untouched" >&2
+      return 1
+    fi
+    if [ "$owner" != "$REPO" ] && [ -d "$owner" ]; then
+      echo "warn: $link is managed by another clone, $owner; left untouched" >&2
+      return 1
+    fi
+  fi
+  mkdir -p "$(dirname "$link")" || return 1
+  make_file_link "$link" "$target" && return 0
+  if is_windows; then
+    write_copy "$link"
+    return
+  fi
+  echo "warn: could not link $link" >&2
+  return 1
+}
+
+# True when the shared AGENTS.md is this clone's: a link into it, or a copy
+# naming it. Nothing is installed or removed downstream of one that is not.
+owns_agents_md() {
+  if [ -L "$AGENTS_MD" ]; then
+    [ -e "$AGENTS_MD" ] &&
+      [ "$(resolve_file "$AGENTS_MD")" = "$(resolve_file "$REPO/AGENTS.md")" ]
+  else
+    [ "$(copy_owner "$AGENTS_MD")" = "$REPO" ]
+  fi
+}
+
+# The harness files that read the shared AGENTS.md, one "harness-dir|file" per
+# line; a harness is skipped when its directory is absent.
+agents_md_users() {
+  printf '%s\n' "$HOME/.claude|$HOME/.claude/CLAUDE.md" \
+    "$HOME/.codex|$HOME/.codex/AGENTS.md" \
+    "$HOME/.pi/agent|$HOME/.pi/agent/AGENTS.md"
+}
+
+# Link ~/.agents/AGENTS.md into this clone, then each harness's file to it --
+# but only when the shared entry is this clone's, so content it does not own
+# is never spread further.
+link_agents_md() {
+  local dir file
+  link_file "$AGENTS_MD" "$REPO/AGENTS.md" || return 0
+  agents_md_users | while IFS='|' read -r dir file; do
+    [ -d "$dir" ] || continue
+    link_file "$file" "$AGENTS_MD"
+  done
+  return 0
+}
+
+# Remove the harness files pointing at this clone's shared AGENTS.md, then the
+# shared entry itself; nothing at all when the shared entry is not this clone's.
+unlink_agents_md() {
+  local dir file
+  owns_agents_md || return 0
+  agents_md_users | while IFS='|' read -r dir file; do
+    if [ -L "$file" ]; then
+      [ -e "$file" ] || continue
+      [ "$(resolve_file "$file")" = "$(resolve_file "$AGENTS_MD")" ] || continue
+    elif [ "$(copy_owner "$file")" != "$REPO" ]; then
+      continue
+    fi
+    rm "$file" && echo "removed: $file"
+  done
+  rm "$AGENTS_MD" && echo "removed: $AGENTS_MD"
 }
 
 # wrapper_for TARGET: the shim written to $BIN_DIR for one skill command.
@@ -228,7 +406,7 @@ wrapper_for() {
 
 # wrapper_target FILE: the command a wrapper this repo wrote runs, else nothing.
 wrapper_target() {
-  [ -f "$1" ] && sed -n "2s|^$WRAPPER_MARK ||p" "$1"
+  [ -f "$1" ] && sed -n -e "2s|^$WRAPPER_MARK ||p" -e "2s|^$OLD_WRAPPER_MARK ||p" "$1"
 }
 
 # Put a wrapper on PATH for every skills/<name>/bin/<command>. A wrapper that
@@ -244,7 +422,7 @@ link_commands() {
     if [ -e "$dest" ] || [ -L "$dest" ]; then
       current="$(wrapper_target "$dest")"
       if [ -z "$current" ]; then
-        echo "warn: $dest exists and is not a skills command wrapper; left untouched" >&2
+        echo "warn: $dest exists and is not an agents command wrapper; left untouched" >&2
         continue
       fi
       if [ "$current" != "$target" ] && [ -e "$current" ]; then
@@ -299,8 +477,12 @@ sync_cmd() {
 # that is gone is removed, one for another clone that still exists is kept with
 # a warning. With ACTION "remove" (uninstall) the entries for this clone are
 # deleted instead and no other managed entry is touched, not even a dead one.
-# Anything else in the file is left exactly as it is. Uses python3, python, or
-# powershell; prints the snippet for manual paste when none is available.
+# Anything else in the file is left exactly as it is. An event holds groups
+# with a nested "hooks" list (Claude, Codex) or flat entries with a "command"
+# (Cursor); the retired statuslines entries in the flat form are dropped here.
+# A file that is not usable JSON of that shape is left byte for byte, and the
+# entry printed for manual paste. Uses python3, python, or powershell; prints
+# the snippet for manual paste when none is available.
 merge_hooks() {
   local file="$1" template="$2" action="${3:-merge}" cmd
   cmd="$(sync_cmd)"
@@ -324,6 +506,7 @@ removing = os.environ.get("HOOK_ACTION") == "remove"
 # Managed entries end in a quoted (or bare) setup.sh path plus --sync; the
 # Windows form only adds a quoted bash executable in front.
 SYNC_RE = re.compile(r'([^"]*)/scripts/setup\.sh"?\s+--sync\s*$')
+OLD_HOOK_RE = re.compile(r'/scripts/setup\.sh" --sync --hook=statuslines$')
 
 
 def clone_of(command):
@@ -355,6 +538,8 @@ def group_clone(group):
     """Clone a whole hook group belongs to, or None to leave the group alone."""
     if not isinstance(group, dict):
         return None
+    if "hooks" not in group:
+        return clone_of(group.get("command"))  # Cursor's flat entry
     entries = group.get("hooks")
     if not isinstance(entries, list) or not entries:
         return None
@@ -367,22 +552,44 @@ def group_clone(group):
     return clones[0]
 
 
+def give_up(reason, headline=None):
+    """Leave the file as it is and say what to change in it by hand."""
+    print(headline or "warn: %s %s; left alone" % (path, reason), file=sys.stderr)
+    if removing:
+        print("      delete the entry running %s from it by hand"
+              % os.environ["SYNC_CMD"], file=sys.stderr)
+    else:
+        print("      add this to it by hand:\n%s" % os.environ["SNIPPET"], file=sys.stderr)
+    sys.exit(0)
+
+
+def retired(group):
+    return (isinstance(group, dict) and "hooks" not in group
+            and isinstance(group.get("command"), str)
+            and OLD_HOOK_RE.search(group["command"]) is not None)
+
+
 self_clone = clone_of(os.environ["SYNC_CMD"])
 if self_clone is None:
     print("warn: unrecognized sync command; %s left alone" % path, file=sys.stderr)
     sys.exit(0)
 
 data = {}
+if os.path.islink(path) and not os.path.exists(path):
+    give_up("is a dangling link")  # not a missing file: writing would replace the link
 try:
     if os.path.exists(path) and os.path.getsize(path) > 0:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
-except (OSError, ValueError) as exc:
-    print("warn: %s is not readable JSON; left alone: %s" % (path, exc), file=sys.stderr)
-    sys.exit(0)
+except OSError as exc:
+    give_up("", "warn: cannot read %s: %s" % (path, exc.strerror or exc))
+except ValueError as exc:
+    give_up("is not readable JSON (%s)" % exc)
 if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
-    print("warn: %s has no hooks object; left alone" % path, file=sys.stderr)
-    sys.exit(0)
+    give_up("has no hooks object")
+for event in template.get("hooks", {}):
+    if not isinstance(data.get("hooks", {}).get(event, []), list):
+        give_up("hooks.%s is not a list" % event)
 
 before = json.dumps(data, sort_keys=True)
 if removing and "hooks" not in data:
@@ -392,6 +599,10 @@ if removing and "hooks" not in data:
     print("ok: %s already up to date" % path)
     sys.exit(0)
 hooks = data.setdefault("hooks", {})
+if not removing:
+    for key, value in template.items():
+        if key != "hooks":
+            data.setdefault(key, value)  # Cursor's "version": 1 in a new file
 warnings = []
 for event, groups in template.get("hooks", {}).items():
     if removing:
@@ -399,11 +610,11 @@ for event, groups in template.get("hooks", {}).items():
         if event not in hooks:
             continue  # nothing of this clone's can be in an absent event
     existing = hooks.setdefault(event, [])
-    if not isinstance(existing, list):
-        warnings.append("warn: %s hooks.%s is not a list; left alone" % (path, event))
-        continue
     mine, drop = [], []
     for index, group in enumerate(existing):
+        if not removing and retired(group):
+            drop.append(index)
+            continue
         clone = group_clone(group)
         if clone is None:
             continue  # not ours: never touched
@@ -431,9 +642,10 @@ if json.dumps(data, sort_keys=True) == before:
     print("ok: %s already up to date" % path)
     sys.exit(0)
 directory = os.path.dirname(path) or "."
-os.makedirs(directory, exist_ok=True)
-handle_fd, temp = tempfile.mkstemp(dir=directory, prefix=".hooks-", suffix=".json")
+temp = None
 try:
+    os.makedirs(directory, exist_ok=True)
+    handle_fd, temp = tempfile.mkstemp(dir=directory, prefix=".hooks-", suffix=".json")
     with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
         handle.write("\n")
@@ -444,8 +656,14 @@ try:
     except OSError:
         pass  # no file there yet: 0600 is the right default for a new config
     os.replace(temp, path)  # atomic: readers never see a half-written file
+except OSError as exc:
+    # An unwritable directory or file: say so in one line and carry on.
+    if temp is not None and os.path.exists(temp):
+        os.unlink(temp)
+    print("warn: cannot write %s: %s" % (path, exc.strerror or exc), file=sys.stderr)
+    sys.exit(0)
 except BaseException:
-    if os.path.exists(temp):
+    if temp is not None and os.path.exists(temp):
         os.unlink(temp)
     raise
 print("updated: %s" % path)
@@ -454,9 +672,11 @@ PY
   fi
 
   if command -v powershell >/dev/null 2>&1; then
+    # The whole script runs as one block: -Command - reads stdin like a console,
+    # where a multi-line statement waits for a blank line that never comes.
     SNIPPET="$snippet" SYNC_CMD="$cmd" HOOK_ACTION="$action" \
       HOOK_FILE="$(cygpath -w "$file" 2>/dev/null || echo "$file")" \
-      powershell -NoProfile -Command - <<'PS'
+      powershell -NoProfile -Command '& ([scriptblock]::Create([Console]::In.ReadToEnd()))' <<'PS'
 $Path = $env:HOOK_FILE
 $tpl = $env:SNIPPET | ConvertFrom-Json
 $removing = $env:HOOK_ACTION -eq 'remove'
@@ -474,6 +694,8 @@ function Get-Normalized($p) {
   return ($p -replace '\\', '/').TrimEnd('/').ToLowerInvariant()
 }
 function Get-GroupClone($g) {
+  if ($g -isnot [pscustomobject]) { return $null }
+  if (-not $g.PSObject.Properties['hooks']) { return Get-Clone $g.command }
   $entries = @($g.hooks)
   if ($entries.Count -eq 0) { return $null }
   $first = $null
@@ -489,7 +711,36 @@ if (-not $selfClone) {
   [Console]::Error.WriteLine("warn: unrecognized sync command; $Path left alone")
   exit 0
 }
-$data = if ((Test-Path $Path) -and (Get-Item $Path).Length -gt 0) { Get-Content $Path -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+function Stop-Unusable($reason, $Headline) {
+  if (-not $Headline) { $Headline = "warn: $Path $reason; left alone" }
+  [Console]::Error.WriteLine($Headline)
+  if ($removing) {
+    [Console]::Error.WriteLine("      delete the entry running $($env:SYNC_CMD) from it by hand")
+  } else {
+    [Console]::Error.WriteLine("      add this to it by hand:`n$($env:SNIPPET)")
+  }
+  exit 0
+}
+$data = [pscustomobject]@{}
+$item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+if ($item -and $item.LinkType -and -not (Test-Path -LiteralPath $Path)) { Stop-Unusable 'is a dangling link' }
+try {
+  if ((Test-Path -LiteralPath $Path) -and (Get-Item -LiteralPath $Path).Length -gt 0) {
+    $data = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+  }
+} catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+  Stop-Unusable 'is not readable JSON' -Headline "warn: cannot read ${Path}: $($_.Exception.Message)"
+} catch {
+  Stop-Unusable 'is not readable JSON'
+}
+if ($data -isnot [pscustomobject]) { Stop-Unusable 'has no hooks object' }
+if ($data.PSObject.Properties['hooks']) {
+  if ($data.hooks -isnot [pscustomobject]) { Stop-Unusable 'has no hooks object' }
+  foreach ($ev in $tpl.hooks.PSObject.Properties) {
+    $p = $data.hooks.PSObject.Properties[$ev.Name]
+    if ($p -and $p.Value -isnot [array]) { Stop-Unusable "hooks.$($ev.Name) is not a list" }
+  }
+}
 if ($removing -and -not $data.PSObject.Properties['hooks']) {
   # Nothing of this clone's can be in a file with no hooks, and writing one
   # would leave more behind than the uninstall removed.
@@ -498,17 +749,30 @@ if ($removing -and -not $data.PSObject.Properties['hooks']) {
 }
 if (-not $data.PSObject.Properties['hooks']) { $data | Add-Member hooks ([pscustomobject]@{}) }
 $before = $data | ConvertTo-Json -Depth 20 -Compress
+if (-not $removing) {
+  foreach ($p in $tpl.PSObject.Properties) {
+    if ($p.Name -ne 'hooks' -and -not $data.PSObject.Properties[$p.Name]) { $data | Add-Member $p.Name $p.Value }
+  }
+}
 foreach ($ev in $tpl.hooks.PSObject.Properties) {
   if (-not $data.hooks.PSObject.Properties[$ev.Name]) {
     if ($removing) { continue }
     $data.hooks | Add-Member $ev.Name @()
   }
-  $groups = if ($removing) { @() } else { @($ev.Value) }
+  # @() around the whole if: assigning an if's output unrolls a one-entry
+  # array to a bare object, whose .Count Windows PowerShell leaves empty.
+  $groups = @(if (-not $removing) { $ev.Value })
   $existing = [System.Collections.ArrayList]@($data.hooks.($ev.Name))
   $mine = @()
   $drop = @()
   for ($i = 0; $i -lt $existing.Count; $i++) {
-    $clone = Get-GroupClone $existing[$i]
+    $g = $existing[$i]
+    if (-not $removing -and $g -is [pscustomobject] -and -not $g.PSObject.Properties['hooks'] -and
+        $g.command -is [string] -and $g.command -match '/scripts/setup\.sh" --sync --hook=statuslines$') {
+      $drop += $i
+      continue
+    }
+    $clone = Get-GroupClone $g
     if (-not $clone) { continue }
     if ((Get-Normalized $clone) -eq $selfClone) { $mine += $i }
     elseif ($removing) { continue }
@@ -526,14 +790,20 @@ if (($data | ConvertTo-Json -Depth 20 -Compress) -eq $before) {
   Write-Output "ok: $Path already up to date"
   exit 0
 }
-New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
 $temp = "$Path.new"
-# WriteAllText with an explicit BOM-less UTF-8, because Set-Content -Encoding
-# UTF8 on Windows PowerShell prepends a byte-order mark that strict JSON
-# readers (Node's JSON.parse among them) refuse.
-$json = ($data | ConvertTo-Json -Depth 20) + "`n"
-[System.IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding $false))
-Move-Item -Force -LiteralPath $temp -Destination $Path
+try {
+  New-Item -ItemType Directory -Force -ErrorAction Stop (Split-Path $Path) | Out-Null
+  # WriteAllText with an explicit BOM-less UTF-8, because Set-Content -Encoding
+  # UTF8 on Windows PowerShell prepends a byte-order mark that strict JSON
+  # readers (Node's JSON.parse among them) refuse.
+  $json = ($data | ConvertTo-Json -Depth 20) + "`n"
+  [System.IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding $false))
+  Move-Item -Force -ErrorAction Stop -LiteralPath $temp -Destination $Path
+} catch {
+  Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $temp
+  [Console]::Error.WriteLine("warn: cannot write ${Path}: $($_.Exception.Message)")
+  exit 0
+}
 Write-Output "updated: $Path"
 PS
     return
@@ -562,48 +832,71 @@ apply_hooks() {
   elif [ "$action" = merge ]; then
     echo "skip: ~/.codex not found (Codex)"
   fi
+  if [ -d "$HOME/.cursor" ]; then
+    merge_hooks "$HOME/.cursor/hooks.json" "$REPO/hooks/cursor.json" "$action"
+  elif [ "$action" = merge ]; then
+    echo "skip: ~/.cursor not found (Cursor)"
+  fi
 }
 
-# claude_statusline FILE [ACTION]: point Claude's statusLine at this clone's
-# statusline/statusline.py, or with "remove" take it out if it is this clone's.
-# The statusLine is replaced only when it is missing, a statusline.py run from
-# any clone, or the legacy ~/.claude/statusline-command.sh wrapper; any other is
-# custom and needs --force. Also drops the SessionStart entries the retired
-# statuslines repo installed (`setup.sh" --sync --hook=statuslines`), which
-# would otherwise point the statusLine back at that old clone. FILE is replaced
-# atomically, and only when its content changes.
-claude_statusline() {
+# json_statusline FILE HARNESS [ACTION]: point the statusLine in FILE (Claude's
+# settings.json or Cursor's cli-config.json) at this clone's
+# statusline/statusline.py rendering for HARNESS, or with "remove" take it out
+# if it is this clone's. The statusLine is replaced only when it is missing, a
+# statusline.py render from any clone, or the legacy
+# ~/.claude/statusline-command.sh wrapper; any other is custom and needs
+# --force. Every other key is kept. Also drops the SessionStart entries the
+# retired statuslines repo installed (`setup.sh" --sync --hook=statuslines`),
+# which would otherwise point the statusLine back at that old clone. FILE is
+# replaced atomically, and only when its content changes; one that is not
+# usable JSON is left alone and the entry printed for manual paste.
+json_statusline() {
   local repo="$REPO"
   is_windows && repo="$(cygpath -m "$REPO")"
-  STATUS_CMD="python3 \"$repo/statusline/statusline.py\" render claude" \
-    SET_STATUSLINE="$([ "${2:-merge}" = merge ] && echo 1)" FORCE="$FORCE" \
+  STATUS_CMD="python3 \"$repo/statusline/statusline.py\" render $2" \
+    SET_STATUSLINE="$([ "${3:-merge}" = merge ] && echo 1)" FORCE="$FORCE" \
     python3 - "$1" <<'PY'
 import json, os, re, sys, tempfile
 
 path, status_cmd = sys.argv[1], os.environ["STATUS_CMD"]
 setting = os.environ["SET_STATUSLINE"] == "1"
 OLD_HOOK_RE = re.compile(r'/scripts/setup\.sh" --sync --hook=statuslines$')
-OURS_RE = re.compile(r'^python3 "(.+)/statusline\.py" render claude$')
+OURS_RE = re.compile(r'^python3 "(.+)/statusline\.py" render (?:claude|cursor)$')
 LEGACY_RE = re.compile(
     r"""^(?:(?:ba)?sh\s+)?(["']?)(?:~|\$HOME|\$\{HOME\}|/[^"']*)?"""
     r"""/\.claude/statusline-command\.sh\1\s*$"""
 )
 
+def give_up(reason, headline=None):
+    """Leave the file as it is; when setting, print the entry to paste."""
+    print(headline or "warn: %s %s; statusLine left alone" % (path, reason), file=sys.stderr)
+    if setting:
+        print("      add this to it by hand: %s" % json.dumps(
+            {"statusLine": {"type": "command", "command": status_cmd}}), file=sys.stderr)
+    sys.exit(1)
+
+
+if os.path.islink(path) and not os.path.exists(path):
+    give_up("is a dangling link")  # not a missing file: writing would replace the link
 try:
     with open(path, encoding="utf-8") as handle:
         original = handle.read()
 except FileNotFoundError:
     original = None
+except OSError as exc:
+    give_up("", "warn: cannot read %s: %s" % (path, exc.strerror or exc))
 if original is None and not setting:
     sys.exit(0)
+
+
 try:
-    data = json.loads(original) if original is not None else {}
+    data = json.loads(original) if original else {}  # an empty file counts as missing
 except ValueError as exc:
-    sys.exit("warn: %s is not valid JSON; statusLine left alone: %s" % (path, exc))
+    give_up("is not valid JSON (%s)" % exc)
 hooks = data.get("hooks", {}) if isinstance(data, dict) else None
 if not isinstance(hooks, dict) or not all(isinstance(g, list) for g in hooks.values()):
     # The hook merge leaves such a file alone too; so does this.
-    sys.exit("warn: %s has no usable hooks object; statusLine left alone" % path)
+    give_up("has no usable hooks object" if isinstance(data, dict) else "is not a JSON object")
 before = json.dumps(data, sort_keys=True)
 
 for event, groups in hooks.items():
@@ -636,16 +929,22 @@ else:
 
 if original is not None and json.dumps(data, sort_keys=True) == before:
     sys.exit(0)
-fd, temp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".statusline-", suffix=".json")
+temp = None
 try:
+    fd, temp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".statusline-", suffix=".json")
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
     if original is not None:
         os.chmod(temp, os.stat(path).st_mode & 0o7777)
     os.replace(temp, path)
+except OSError as exc:
+    if temp is not None and os.path.exists(temp):
+        os.unlink(temp)
+    print("warn: cannot write %s: %s" % (path, exc.strerror or exc), file=sys.stderr)
+    sys.exit(1)
 except BaseException:
-    if os.path.exists(temp):
+    if temp is not None and os.path.exists(temp):
         os.unlink(temp)
     raise
 print("updated: %s" % path)
@@ -653,7 +952,7 @@ PY
 }
 
 # apply_statusline [ACTION]: set up (or, with "remove", take out) the shared
-# statusline in Claude and Codex. It needs python3 >= 3.11 for tomllib; without
+# statusline in Claude, Cursor and Codex. It needs python3 >= 3.11 for tomllib; without
 # it the statusline is skipped with a warning and the rest of the run goes on.
 apply_statusline() {
   local action="${1:-merge}"
@@ -662,12 +961,15 @@ apply_statusline() {
     return 0
   fi
   if [ -d "$HOME/.claude" ]; then
-    claude_statusline "$HOME/.claude/settings.json" "$action"
+    json_statusline "$HOME/.claude/settings.json" claude "$action"
+  fi
+  if [ -d "$HOME/.cursor" ]; then
+    json_statusline "$HOME/.cursor/cli-config.json" cursor "$action"
   fi
   if [ -d "$HOME/.codex" ]; then
-    # The retired statuslines repo's hook lives here too; only the Claude
-    # file carries a statusLine, so setting one is skipped for this file.
-    claude_statusline "$HOME/.codex/hooks.json" remove
+    # The retired statuslines repo's hook lives here too; Codex keeps its
+    # status line in config.toml, so setting one is skipped for this file.
+    json_statusline "$HOME/.codex/hooks.json" claude remove
     if [ "$action" = merge ]; then
       python3 "$REPO/statusline/statusline.py" --config "$REPO/statusline/config.json" \
         sync codex --target "$HOME/.codex/config.toml" ||
@@ -693,9 +995,9 @@ hold_lock() {
   trap 'release_lock' EXIT
 }
 
-# One run at a time: Claude, Codex and Pi can all start a session at once.
+# One run at a time: Claude, Codex, Cursor and Pi can all start a session at once.
 acquire_lock() {
-  if [ "${SKILLS_SYNC_REEXEC:-}" = 1 ] && [ -d "$LOCK" ]; then
+  if [ "${AGENTS_SYNC_REEXEC:-}" = 1 ] && [ -d "$LOCK" ]; then
     hold_lock  # inherited across exec from the run that pulled; still ours
     return 0
   fi
@@ -734,10 +1036,10 @@ interpreter() {
 }
 
 # Re-run this script once from the freshly pulled copy, on the interpreter the
-# hook uses. SKILLS_SYNC_REEXEC stops the new copy from pulling again, so this
+# hook uses. AGENTS_SYNC_REEXEC stops the new copy from pulling again, so this
 # cannot loop. The lock stays held across exec; the new run adopts it.
 reexec() {
-  export SKILLS_SYNC_REEXEC=1
+  export AGENTS_SYNC_REEXEC=1
   exec "$(interpreter)" "$REPO/scripts/setup.sh" "$@"
 }
 
@@ -762,16 +1064,16 @@ looks_like_clone() {
 # of this script, so the hook it installs names a path that stays valid.
 bootstrap() {
   local clone
-  if [ "${SKILLS_BOOTSTRAPPED:-}" = 1 ]; then
+  if [ "${AGENTS_BOOTSTRAPPED:-}" = 1 ]; then
     echo "error: bootstrap did not produce a usable clone" >&2
     return 1
   fi
-  clone="${SKILLS_HOME:-$HOME/source/skills}"
+  clone="${AGENTS_HOME:-$HOME/source/agents}"
   if looks_like_clone "$clone"; then
     echo "using clone: $clone"
   elif [ -e "$clone" ] || [ -L "$clone" ]; then
     echo "error: $clone exists and is not a clone of $REPO_URL; move it or set" >&2
-    echo "       SKILLS_HOME to another path" >&2
+    echo "       AGENTS_HOME to another path" >&2
     return 1
   elif [ "$MODE" = --uninstall ]; then
     echo "error: no clone at $clone to uninstall" >&2
@@ -782,7 +1084,7 @@ bootstrap() {
     git clone "$REPO_URL" "$clone" || { echo "error: git clone failed" >&2; return 1; }
     looks_like_clone "$clone" || { echo "error: $clone is not usable" >&2; return 1; }
   fi
-  export SKILLS_BOOTSTRAPPED=1
+  export AGENTS_BOOTSTRAPPED=1
   exec "$(interpreter)" "$clone/scripts/setup.sh" "$@"
 }
 
@@ -790,7 +1092,7 @@ bootstrap() {
 # reads a script as it runs it, so continuing in this process could execute a
 # mix of the old and new file.
 pull() {
-  [ "${SKILLS_SYNC_REEXEC:-}" = 1 ] && return 0
+  [ "${AGENTS_SYNC_REEXEC:-}" = 1 ] && return 0
   # Throttle: a burst of session starts should hit the network once. Spelled as
   # "not older than a minute" rather than -mmin -1 because BSD find (macOS)
   # rounds the age up to the next whole minute, which makes -mmin -1 false for
@@ -815,6 +1117,7 @@ reconcile() {
   link_skills
   link_claude_skills
   link_pi
+  link_agents_md
   link_commands
   apply_hooks merge
   apply_statusline merge
@@ -851,13 +1154,13 @@ uninstall() {
       "$repo_skills"/*) unlink_dir "$d" && echo "removed: $d" ;;
     esac
   done
-  for ext in "$REPO"/pi/*/; do
-    [ -d "$ext" ] || continue
-    pi="$HOME/.pi/agent/extensions/$(basename "$ext")"
-    if [ "$(link_target "$pi")" = "$(unix_path "${ext%/}")" ]; then
-      unlink_dir "$pi" && echo "removed: $pi"
-    fi
+  # Every link into this clone's pi/, including one left by a renamed extension.
+  for pi in "$HOME/.pi/agent/extensions"/*; do
+    case "$(link_target "$pi")" in
+      "$(unix_path "$REPO/pi")"/*) unlink_dir "$pi" && echo "removed: $pi" ;;
+    esac
   done
+  unlink_agents_md
   remove_commands all
   apply_hooks remove
   apply_statusline remove
@@ -870,8 +1173,6 @@ next_steps() {
 
 Next steps:
   - Codex: open Codex and run /hooks to review and trust the new SessionStart hook.
-  - Cursor: enable "Third-party skills" (Settings > Rules, Skills, Subagents) so it
-    runs the hook from ~/.claude/settings.json.
   - Machine-local shared skills: plain directories in $AGENTS_SKILLS.
   - Harness-local skills: plain directories in each harness's own skills directory.
 MSG
@@ -885,6 +1186,9 @@ main() {
     *) echo "usage: $0 [--force | --sync | --uninstall]" >&2; exit 2 ;;
   esac
 
+  # A script from before the rename execs this one with its own flag set and
+  # the lock held; that hand-off is the same as ours.
+  if [ "${SKILLS_SYNC_REEXEC:-}" = 1 ]; then export AGENTS_SYNC_REEXEC=1; fi
   looks_like_clone "$REPO" || bootstrap "$@" || exit 1
   LOCK="$REPO/.sync.lock"
   STAMP="$REPO/.sync-stamp"

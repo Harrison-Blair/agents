@@ -58,6 +58,8 @@ ANSI = {
 }
 RESET = "\033[0m"
 
+STDIN_LIMIT = 1024 * 1024
+
 TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 STATUS_RE = re.compile(r"^(\s*)status_line\s*=")
 DOTTED_STATUS_RE = re.compile(r"^\s*tui\.status_line\s*=")
@@ -65,6 +67,14 @@ DOTTED_STATUS_RE = re.compile(r"^\s*tui\.status_line\s*=")
 
 class ConfigError(ValueError):
     """Raised when the shared or provider configuration is invalid."""
+
+
+class CodexReadError(ConfigError):
+    """Codex config left alone; carries the entry to paste by hand."""
+
+    def __init__(self, message: str, entry: str) -> None:
+        super().__init__(message)
+        self.entry = entry
 
 
 def default_shared_config_path() -> Path:
@@ -147,8 +157,13 @@ def load_config(path: Path) -> dict[str, Any]:
 def _number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)) and math.isfinite(float(value)):
-        return float(value)
+    if isinstance(value, (int, float)):
+        try:
+            number = float(value)
+        except OverflowError:
+            return None
+        if math.isfinite(number):
+            return number
     return None
 
 
@@ -249,7 +264,7 @@ def _git_branch(cwd: Any) -> str | None:
             text=True,
             timeout=1,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
     branch = result.stdout.strip()
     return branch if result.returncode == 0 and branch else None
@@ -274,6 +289,8 @@ def _session_tokens(transcript_path: Any) -> tuple[int, int] | None:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(entry, dict):
+                    continue
                 if entry.get("type") != "assistant" or entry.get("isSidechain"):
                     continue
                 message = entry.get("message")
@@ -283,7 +300,7 @@ def _session_tokens(transcript_path: Any) -> tuple[int, int] | None:
                 message_id = message.get("id")
                 if isinstance(usage, dict) and isinstance(message_id, str):
                     usage_by_id[message_id] = usage
-    except OSError:
+    except (OSError, ValueError):
         return None
     if not usage_by_id:
         return None
@@ -304,7 +321,10 @@ def _clock(epoch: Any, now: datetime) -> str | None:
     number = _number(epoch)
     if number is None:
         return None
-    when = datetime.fromtimestamp(number, tz=now.tzinfo)
+    try:
+        when = datetime.fromtimestamp(number, tz=now.tzinfo)
+    except (OverflowError, OSError, ValueError):
+        return None
     clock = when.strftime("%-I:%M%p").lower()
     if when.date() == now.date():
         return clock
@@ -423,10 +443,28 @@ def render_claude(
     return "\n".join(rendered_lines)
 
 
+def render_cursor(
+    data: Any, config: dict[str, Any], now: datetime | None = None
+) -> str:
+    """Render Cursor's payload, whose workspace.project_dir is its transcripts directory."""
+    if not isinstance(data, dict):
+        data = {}
+    workspace = data.get("workspace")
+    current_dir = workspace.get("current_dir") if isinstance(workspace, dict) else None
+    if not isinstance(current_dir, str) or not current_dir:
+        current_dir = None
+    data = {**data, "workspace": {"current_dir": current_dir, "project_dir": current_dir}}
+    return render_claude(data, config, now)
+
+
 def parse_json_stream(stream: Any) -> Any:
+    """Read at most STDIN_LIMIT bytes; larger, empty, or invalid input is {}."""
     try:
-        return json.load(stream)
-    except (json.JSONDecodeError, OSError, TypeError):
+        raw = stream.read(STDIN_LIMIT + 1)
+        if len(raw) > STDIN_LIMIT:
+            return {}
+        return json.loads(raw)
+    except (ValueError, RecursionError, OSError, TypeError):
         return {}
 
 
@@ -505,7 +543,7 @@ def update_codex_toml(text: str, fields: list[str]) -> str:
             "ambiguous Codex config: expected at most one [tui] status_line assignment"
         )
 
-    assignment = f"status_line = {json.dumps(fields, separators=(', ', ': '))}{newline}"
+    assignment = f"{codex_assignment(fields)}{newline}"
 
     if status_assignments:
         start, end = status_assignments[0]
@@ -528,6 +566,10 @@ def update_codex_toml(text: str, fields: list[str]) -> str:
     if reparsed.get("tui", {}).get("status_line") != fields:
         raise ConfigError("generated Codex status_line did not validate")
     return updated
+
+
+def codex_assignment(fields: list[str]) -> str:
+    return f"status_line = {json.dumps(fields, separators=(', ', ': '))}"
 
 
 def write_atomic(path: Path, content: str) -> None:
@@ -559,17 +601,23 @@ def write_atomic(path: Path, content: str) -> None:
 
 
 def sync_codex(path: Path, config: dict[str, Any]) -> bool:
+    fields = codex_status_line(config)
+    entry = f"[tui]\n{codex_assignment(fields)}"
+    if path.is_symlink() and not path.exists():
+        raise CodexReadError(f"{path} is a dangling link; left alone", entry)
     try:
         original = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         original = ""
     except OSError as exc:
-        raise ConfigError(f"could not read Codex config {path}: {exc}") from exc
+        raise CodexReadError(
+            f"could not read Codex config {path}: {exc}", entry
+        ) from exc
 
-    updated = update_codex_toml(original, codex_status_line(config))
+    updated = update_codex_toml(original, fields)
     if updated == original:
         return False
-    write_atomic(path, updated)
+    write_atomic(path.resolve(), updated)
     return True
 
 
@@ -594,7 +642,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     render = subparsers.add_parser("render", help="render provider session data")
-    render.add_argument("provider", choices=("claude",))
+    render.add_argument("provider", choices=("claude", "cursor"))
 
     for command in ("sync", "check"):
         provider = subparsers.add_parser(
@@ -615,7 +663,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config.expanduser())
         if args.command == "render":
-            print(render_claude(parse_json_stream(sys.stdin), config), end="")
+            render = render_cursor if args.provider == "cursor" else render_claude
+            print(render(parse_json_stream(sys.stdin.buffer), config), end="")
             return 0
 
         target = args.target.expanduser()
@@ -630,6 +679,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if in_sync else 1
     except ConfigError as exc:
         print(f"ai-statusline: {exc}", file=sys.stderr)
+        if isinstance(exc, CodexReadError):
+            print(exc.entry, file=sys.stderr)
         return 2
 
 

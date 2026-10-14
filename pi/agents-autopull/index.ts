@@ -1,5 +1,5 @@
-// Pi extension: pull the skills repo and re-link skills at session start.
-// Linked into ~/.pi/agent/extensions/skills-autopull by scripts/setup.sh.
+// Pi extension: pull the agents repo and re-link it at session start.
+// Linked into ~/.pi/agent/extensions/agents-autopull by scripts/setup.sh.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";

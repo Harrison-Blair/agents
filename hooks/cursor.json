@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "__SYNC_CMD__",
+        "timeout": 30
+      }
+    ]
+  }
+}

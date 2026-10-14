@@ -1,5 +1,6 @@
 """Native junction tests; this module intentionally fails on Windows without Git Bash."""
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -11,7 +12,7 @@ import unittest
 @unittest.skipUnless(os.name == "nt", "native junction tests run on Windows CI")
 class WindowsSetupTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="skills setup ")
+        self.temp = tempfile.TemporaryDirectory(prefix="agents setup ")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.home = self.base / "home"
@@ -27,6 +28,7 @@ class WindowsSetupTests(unittest.TestCase):
         )
         shutil.copytree(Path(__file__).parents[1] / "hooks", self.repo / "hooks")
         shutil.copytree(Path(__file__).parents[1] / "statusline", self.repo / "statusline")
+        shutil.copy2(Path(__file__).parents[1] / "AGENTS.md", self.repo / "AGENTS.md")
         self.add_skill(self.repo / "skills/shared-one")
         self.env = dict(os.environ)
         # Git Bash accepts drive-letter paths with forward slashes and uses HOME
@@ -173,6 +175,98 @@ class WindowsSetupTests(unittest.TestCase):
         claude_link = self.claude / "shared-one"
         self.assertTrue(self.is_junction(claude_link))
         self.assertEqual(claude_link.resolve(), (moved / "skills/shared-one").resolve())
+
+    def agents_paths(self):
+        (self.home / ".codex").mkdir(exist_ok=True)
+        (self.home / ".pi/agent").mkdir(parents=True, exist_ok=True)
+        return [self.home / ".agents/AGENTS.md", self.home / ".claude/CLAUDE.md",
+                self.home / ".codex/AGENTS.md", self.home / ".pi/agent/AGENTS.md"]
+
+    def marked_copy(self):
+        first, rest = (self.repo / "AGENTS.md").read_text(encoding="utf-8").split("\n", 1)
+        clone = subprocess.run([self.bash, "-c", "cd \"$1\" && pwd -P", "_",
+                                self.repo.as_posix()], text=True, capture_output=True)
+        return first.replace("<clone>", clone.stdout.strip()) + "\n" + rest
+
+    def test_agents_md_links_are_real_symlinks_when_allowed(self):
+        paths = self.agents_paths()
+        result = self.run_setup()
+        if "wrote a managed copy" in result.stderr:
+            self.skipTest("this runner cannot create symlinks: " + result.stderr)
+        for path in paths:
+            self.assertTrue(path.is_symlink(), path)
+            self.assertEqual(path.read_text(encoding="utf-8"),
+                             (self.repo / "AGENTS.md").read_text(encoding="utf-8"))
+        self.run_setup("--uninstall")
+        for path in paths:
+            self.assertFalse(path.exists() or path.is_symlink(), path)
+
+    def test_agents_md_falls_back_to_marked_copies_and_refreshes_them(self):
+        paths = self.agents_paths()
+        # An `ln` that cannot link stands in for missing symlink rights. It is
+        # a function from BASH_ENV, not a PATH entry: Git's bash.exe launcher
+        # puts /usr/bin ahead of any PATH the test passes in.
+        calls = self.base / "ln-calls"
+        shim = self.base / "no-symlinks.sh"
+        shim.write_text('ln() { echo "$*" >> "%s"; return 1; }\n' % calls.as_posix(),
+                        encoding="utf-8")
+        self.env["BASH_ENV"] = shim.as_posix()
+        result = self.run_setup()
+        self.assertTrue(calls.is_file(), "the ln shim never ran")
+        self.assertEqual(result.stderr.count("wrote a managed copy"), 4, result.stderr)
+        for path in paths:
+            self.assertFalse(path.is_symlink(), path)
+            self.assertEqual(path.read_text(encoding="utf-8"), self.marked_copy())
+        result = self.run_setup("--sync")
+        self.assertNotIn("wrote a managed copy", result.stderr)
+        with (self.repo / "AGENTS.md").open("a", encoding="utf-8") as handle:
+            handle.write("new rule\n")
+        result = self.run_setup("--sync")
+        self.assertEqual(result.stderr.count("wrote a managed copy"), 4, result.stderr)
+        for path in paths:
+            self.assertTrue(path.read_text(encoding="utf-8").endswith("new rule\n"), path)
+        self.run_setup("--uninstall")
+        for path in paths:
+            self.assertFalse(path.exists(), path)
+
+    def run_powershell_merge(self, hooks, action="merge"):
+        """Merge the Cursor template with python hidden, so PowerShell runs."""
+        definitions = (self.repo / "scripts/setup.sh").read_text(encoding="utf-8")
+        harness = self.repo / "scripts/powershell-merge.sh"
+        harness.write_text(definitions.split('\nmain "$@"')[0] + r'''
+command() {
+  if [ "$1" = -v ] && { [ "$2" = python3 ] || [ "$2" = python ]; }; then return 1; fi
+  builtin command "$@"
+}
+merge_hooks "$1" "$REPO/hooks/cursor.json" "$2"
+''', encoding="utf-8")
+        return subprocess.run([self.bash, "scripts/powershell-merge.sh", hooks.as_posix(),
+                               action], cwd=self.repo, env=self.env, text=True,
+                              capture_output=True)
+
+    def test_powershell_merges_cursor_hooks_and_leaves_bad_files(self):
+        cursor = self.home / ".cursor"
+        cursor.mkdir()
+        hooks = cursor / "hooks.json"
+        herdr = {"command": "bash '/home/x/.cursor/herdr-agent-state.sh' session"}
+        hooks.write_text(json.dumps({"hooks": {"sessionStart": [herdr]}, "version": 1}),
+                         encoding="utf-8")
+        result = self.run_powershell_merge(hooks)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entries = json.loads(hooks.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
+        self.assertEqual(entries[0], herdr)
+        self.assertEqual(len(entries), 2, [entries, result.stdout, result.stderr])
+        self.assertTrue(entries[1]["command"].endswith('/scripts/setup.sh" --sync'))
+        result = self.run_powershell_merge(hooks, "remove")
+        self.assertEqual(json.loads(hooks.read_text(encoding="utf-8"))["hooks"]["sessionStart"],
+                         [herdr])
+        for content in ("{", '{"hooks": []}', '{"hooks": {"sessionStart": {}}}'):
+            with self.subTest(content=content):
+                hooks.write_text(content, encoding="utf-8")
+                result = self.run_powershell_merge(hooks)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(hooks.read_text(encoding="utf-8"), content)
+                self.assertIn("by hand", result.stderr)
 
 
 if __name__ == "__main__":
