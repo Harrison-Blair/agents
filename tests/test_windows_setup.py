@@ -203,12 +203,16 @@ class WindowsSetupTests(unittest.TestCase):
 
     def test_agents_md_falls_back_to_marked_copies_and_refreshes_them(self):
         paths = self.agents_paths()
-        # An `ln` that cannot link stands in for missing symlink rights.
-        shim = self.base / "no-symlinks"
-        shim.mkdir()
-        (shim / "ln").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-        self.env["PATH"] = str(shim) + os.pathsep + self.env["PATH"]
+        # An `ln` that cannot link stands in for missing symlink rights. It is
+        # a function from BASH_ENV, not a PATH entry: Git's bash.exe launcher
+        # puts /usr/bin ahead of any PATH the test passes in.
+        calls = self.base / "ln-calls"
+        shim = self.base / "no-symlinks.sh"
+        shim.write_text('ln() { echo "$*" >> "%s"; return 1; }\n' % calls.as_posix(),
+                        encoding="utf-8")
+        self.env["BASH_ENV"] = shim.as_posix()
         result = self.run_setup()
+        self.assertTrue(calls.is_file(), "the ln shim never ran")
         self.assertEqual(result.stderr.count("wrote a managed copy"), 4, result.stderr)
         for path in paths:
             self.assertFalse(path.is_symlink(), path)

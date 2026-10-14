@@ -495,7 +495,7 @@ class SetupTests(unittest.TestCase):
         result = self.run_setup()
         self.assertEqual((bin_dir / "mine").read_text(), "#!/bin/sh\necho local\n")
         self.assertIn(str(other), (bin_dir / "theirs").read_text())
-        self.assertIn(str(self.repo), (bin_dir / "stale").read_text(), "a dead clone's wrapper is taken over")
+        self.assertIn(str(self.repo.resolve()), (bin_dir / "stale").read_text(), "a dead clone's wrapper is taken over")
         self.assertIn("mine exists and is not an agents command wrapper", result.stderr)
         self.assertIn("from another clone", result.stderr)
 
@@ -1116,7 +1116,8 @@ link_agents_md
     def test_old_marker_wrappers_are_taken_over(self):
         bin_dir = self.home / ".local/bin"
         bin_dir.mkdir(parents=True)
-        mine = self.add_command(self.skill, "hello", "hi")
+        # The pre-rename script recorded the physical path, as pwd -P gives it.
+        mine = self.add_command(self.skill, "hello", "hi").resolve()
         old = "#!/bin/sh\n# skills repo command: %s\nexec \"%s\" \"$@\"\n" % (mine, mine)
         (bin_dir / "hello").write_text(old)
         result = self.run_setup()
@@ -1147,7 +1148,7 @@ link_agents_md
         extensions = self.home / ".pi/agent/extensions"
         extensions.mkdir(parents=True)
         old = extensions / "old-extension"
-        old.symlink_to(self.repo / "pi/old-extension")
+        old.symlink_to(self.repo.resolve() / "pi/old-extension")
         foreign = extensions / "foreign"
         foreign.symlink_to(self.base / "missing")
         result = self.run_setup()
@@ -1157,7 +1158,7 @@ link_agents_md
         self.assertEqual((extensions / "agents-autopull").resolve(),
                          (self.repo / "pi/agents-autopull").resolve())
         # Uninstall takes every link into this clone's pi/, whatever its name.
-        old.symlink_to(self.repo / "pi/old-extension")
+        old.symlink_to(self.repo.resolve() / "pi/old-extension")
         self.run_setup("--uninstall")
         self.assertEqual(sorted(p.name for p in extensions.iterdir()), ["foreign"])
 

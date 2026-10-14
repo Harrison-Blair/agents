@@ -757,7 +757,9 @@ foreach ($ev in $tpl.hooks.PSObject.Properties) {
     if ($removing) { continue }
     $data.hooks | Add-Member $ev.Name @()
   }
-  $groups = if ($removing) { @() } else { @($ev.Value) }
+  # @() around the whole if: assigning an if's output unrolls a one-entry
+  # array to a bare object, whose .Count Windows PowerShell leaves empty.
+  $groups = @(if (-not $removing) { $ev.Value })
   $existing = [System.Collections.ArrayList]@($data.hooks.($ev.Name))
   $mine = @()
   $drop = @()
