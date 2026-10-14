@@ -401,6 +401,29 @@ class BoundedStdinTests(unittest.TestCase):
                     self.assertEqual(result.stdout, b"")
                     self.assertEqual(result.stderr, b"")
 
+    def test_cli_nul_and_newline_paths_never_crash(self) -> None:
+        for provider in ("claude", "cursor"):
+            for key in ("cwd", "transcript_path"):
+                for value in ("\u0000", "a\u0000b", "a\nb", "/tmp/\u0000/x"):
+                    with self.subTest(provider=provider, key=key, value=value):
+                        result = self.run_cli(provider, json.dumps({key: value}).encode())
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        if key == "transcript_path":
+                            self.assertEqual(result.stdout, self.run_cli(provider, b"{}").stdout)
+                        self.assertEqual(result.stderr, b"")
+
+    def test_session_tokens_survives_malformed_transcript_files(self) -> None:
+        cases = {
+            "non-dict JSON line": b'["assistant", "usage"]\n',
+            "invalid UTF-8": b'\xff\xfe "assistant" "usage"\n',
+        }
+        for name, content in cases.items():
+            with self.subTest(case=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "t.jsonl"
+                    path.write_bytes(content)
+                    self.assertIsNone(statusline._session_tokens(str(path)))
+
     def test_cli_render_cursor_sample(self) -> None:
         result = self.run_cli("cursor", json.dumps(CURSOR_SAMPLE).encode())
         self.assertEqual(result.returncode, 0, result.stderr)

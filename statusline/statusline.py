@@ -256,7 +256,7 @@ def _git_branch(cwd: Any) -> str | None:
             text=True,
             timeout=1,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
     branch = result.stdout.strip()
     return branch if result.returncode == 0 and branch else None
@@ -281,6 +281,8 @@ def _session_tokens(transcript_path: Any) -> tuple[int, int] | None:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(entry, dict):
+                    continue
                 if entry.get("type") != "assistant" or entry.get("isSidechain"):
                     continue
                 message = entry.get("message")
@@ -290,7 +292,7 @@ def _session_tokens(transcript_path: Any) -> tuple[int, int] | None:
                 message_id = message.get("id")
                 if isinstance(usage, dict) and isinstance(message_id, str):
                     usage_by_id[message_id] = usage
-    except OSError:
+    except (OSError, ValueError):
         return None
     if not usage_by_id:
         return None
