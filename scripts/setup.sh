@@ -638,9 +638,10 @@ if json.dumps(data, sort_keys=True) == before:
     print("ok: %s already up to date" % path)
     sys.exit(0)
 directory = os.path.dirname(path) or "."
-os.makedirs(directory, exist_ok=True)
-handle_fd, temp = tempfile.mkstemp(dir=directory, prefix=".hooks-", suffix=".json")
+temp = None
 try:
+    os.makedirs(directory, exist_ok=True)
+    handle_fd, temp = tempfile.mkstemp(dir=directory, prefix=".hooks-", suffix=".json")
     with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
         handle.write("\n")
@@ -651,8 +652,14 @@ try:
     except OSError:
         pass  # no file there yet: 0600 is the right default for a new config
     os.replace(temp, path)  # atomic: readers never see a half-written file
+except OSError as exc:
+    # An unwritable directory or file: say so in one line and carry on.
+    if temp is not None and os.path.exists(temp):
+        os.unlink(temp)
+    print("warn: cannot write %s: %s" % (path, exc.strerror or exc), file=sys.stderr)
+    sys.exit(0)
 except BaseException:
-    if os.path.exists(temp):
+    if temp is not None and os.path.exists(temp):
         os.unlink(temp)
     raise
 print("updated: %s" % path)
@@ -770,14 +777,20 @@ if (($data | ConvertTo-Json -Depth 20 -Compress) -eq $before) {
   Write-Output "ok: $Path already up to date"
   exit 0
 }
-New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
 $temp = "$Path.new"
-# WriteAllText with an explicit BOM-less UTF-8, because Set-Content -Encoding
-# UTF8 on Windows PowerShell prepends a byte-order mark that strict JSON
-# readers (Node's JSON.parse among them) refuse.
-$json = ($data | ConvertTo-Json -Depth 20) + "`n"
-[System.IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding $false))
-Move-Item -Force -LiteralPath $temp -Destination $Path
+try {
+  New-Item -ItemType Directory -Force -ErrorAction Stop (Split-Path $Path) | Out-Null
+  # WriteAllText with an explicit BOM-less UTF-8, because Set-Content -Encoding
+  # UTF8 on Windows PowerShell prepends a byte-order mark that strict JSON
+  # readers (Node's JSON.parse among them) refuse.
+  $json = ($data | ConvertTo-Json -Depth 20) + "`n"
+  [System.IO.File]::WriteAllText($temp, $json, (New-Object System.Text.UTF8Encoding $false))
+  Move-Item -Force -ErrorAction Stop -LiteralPath $temp -Destination $Path
+} catch {
+  Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $temp
+  [Console]::Error.WriteLine("warn: cannot write ${Path}: $($_.Exception.Message)")
+  exit 0
+}
 Write-Output "updated: $Path"
 PS
     return
@@ -860,7 +873,7 @@ def give_up(reason):
 
 
 try:
-    data = json.loads(original) if original is not None else {}
+    data = json.loads(original) if original else {}  # an empty file counts as missing
 except ValueError as exc:
     give_up("is not valid JSON (%s)" % exc)
 hooks = data.get("hooks", {}) if isinstance(data, dict) else None
@@ -899,16 +912,22 @@ else:
 
 if original is not None and json.dumps(data, sort_keys=True) == before:
     sys.exit(0)
-fd, temp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".statusline-", suffix=".json")
+temp = None
 try:
+    fd, temp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".statusline-", suffix=".json")
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
     if original is not None:
         os.chmod(temp, os.stat(path).st_mode & 0o7777)
     os.replace(temp, path)
+except OSError as exc:
+    if temp is not None and os.path.exists(temp):
+        os.unlink(temp)
+    print("warn: cannot write %s: %s" % (path, exc.strerror or exc), file=sys.stderr)
+    sys.exit(1)
 except BaseException:
-    if os.path.exists(temp):
+    if temp is not None and os.path.exists(temp):
         os.unlink(temp)
     raise
 print("updated: %s" % path)

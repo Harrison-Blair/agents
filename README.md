@@ -174,7 +174,8 @@ Claude's and Cursor's `statusLine` is replaced only when it is missing, already
 a `statusline.py ... render` from any clone (so a moved clone is picked up), or
 the legacy `~/.claude/statusline-command.sh` wrapper. Any other statusLine is
 custom: it is left alone with a warning. A file that is not valid JSON is left
-alone too, and the entry is printed for you to add. To replace a custom one
+alone too, and the entry is printed for you to add; an empty file counts as
+missing. To replace a custom one
 anyway:
 
 ```sh

@@ -1102,7 +1102,7 @@ link_agents_md
         cursor = self.home / ".cursor"
         cursor.mkdir()
         config = cursor / "cli-config.json"
-        for content in ("{", "", "[]"):
+        for content in ("{", "[]"):
             with self.subTest(content=content):
                 config.write_text(content)
                 result = self.run_setup("--sync")
@@ -1238,6 +1238,65 @@ link_agents_md
             return {k: (json.loads(v[1]) if k.endswith(".json") else v)
                     for k, v in state.items()}
         self.assertEqual(parsed(after), parsed(before))
+
+    def test_unwritable_harness_dirs_warn_once_per_write_and_change_nothing(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        (self.home / ".cursor").mkdir()
+        claude, cursor = self.home / ".claude", self.home / ".cursor"
+        targets = [claude / "settings.json", cursor / "hooks.json",
+                   cursor / "cli-config.json"]
+        # settings.json is written by the hook merge and by the statusLine
+        # writer, so it gets one warning from each; the others get one.
+        expected = {str(claude / "settings.json"): 2, str(cursor / "hooks.json"): 1,
+                    str(cursor / "cli-config.json"): 1}
+
+        def locked_run(mode):
+            for directory in (claude, cursor):
+                directory.chmod(0o555)
+                self.addCleanup(directory.chmod, 0o755)
+            before = {t: t.read_bytes() for t in targets}
+            result = self.run_setup(mode)
+            for directory in (claude, cursor):
+                directory.chmod(0o755)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertEqual({t: t.read_bytes() for t in targets}, before)
+            warns = [l for l in result.stderr.splitlines()
+                     if l.startswith("warn: cannot write ")]
+            for path, count in expected.items():
+                self.assertEqual(
+                    len([l for l in warns if l.startswith("warn: cannot write %s: " % path)]),
+                    count, result.stderr)
+            self.assertEqual(len(warns), sum(expected.values()), result.stderr)
+
+        self.run_setup()
+        locked_run("--uninstall")
+        for target, text in zip(targets, ('{"custom": "keep"}\n', '{"version": 1}\n', "{}\n")):
+            target.write_text(text)
+        locked_run("--sync")
+
+    def test_empty_config_files_count_as_missing_and_malformed_ones_are_left(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".cursor").mkdir()
+        files = [self.home / ".claude/settings.json", self.home / ".codex/hooks.json",
+                 self.home / ".cursor/hooks.json", self.home / ".cursor/cli-config.json"]
+        for path in files:
+            path.write_bytes(b"")
+        result = self.run_setup()
+        self.assertNotIn("warn: ", result.stderr)
+        keys = [{"hooks", "statusLine"}, {"hooks"}, {"version", "hooks"}, {"statusLine"}]
+        for path, expected in zip(files, keys):
+            data = json.loads(path.read_text())
+            self.assertEqual(set(data), expected, path)
+            if "hooks" in expected:
+                self.assertIn(json.dumps(self.sync_command())[1:-1], path.read_text())
+        for path in files:
+            path.write_bytes(b"{")
+        result = self.run_setup()
+        for path in files:
+            self.assertEqual(path.read_bytes(), b"{")
+            self.assertIn("warn: %s is not" % path, result.stderr)
+        self.assertIn("add this to it by hand", result.stderr)
 
 
 if __name__ == "__main__":
