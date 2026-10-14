@@ -188,6 +188,33 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((self.shared / "unrelated-broken").is_symlink())
         self.assertTrue((local / "SKILL.md").is_file())
 
+    def test_sync_from_moved_clone_replaces_dangling_links(self):
+        extensions = self.home / ".pi/agent/extensions"
+        extensions.parent.mkdir(parents=True)
+        # A second clone that still exists keeps its link: only a link whose
+        # target is gone is this setup's to replace.
+        other = self.add_skill(self.base / "other/skills/elsewhere")
+        (self.shared / "elsewhere").symlink_to(other)
+        self.add_skill(self.repo / "skills/elsewhere")
+        self.run_setup()
+        moved = self.base / "moved"
+        self.repo.rename(moved)
+        self.script = moved / "scripts/setup.sh"
+        for link in (self.shared / "shared-one", extensions / "skills-autopull"):
+            self.assertTrue(link.is_symlink())
+            self.assertFalse(link.exists(), link)
+        result = self.run_setup("--sync")
+        self.assertEqual((self.shared / "shared-one").resolve(),
+                         (moved / "skills/shared-one").resolve())
+        self.assertEqual((self.claude / "shared-one").resolve(),
+                         (moved / "skills/shared-one").resolve())
+        self.assertEqual((extensions / "skills-autopull").resolve(),
+                         (moved / "pi/skills-autopull").resolve())
+        self.assertIn("elsewhere", result.stderr)
+        self.assertIn("left untouched", result.stderr)
+        self.assertEqual((self.shared / "elsewhere").readlink(), other)
+        self.assertTrue((other / "SKILL.md").is_file())
+
     def test_unrelated_root_symlinks_are_never_followed(self):
         for exists in (True, False):
             with self.subTest(exists=exists):
@@ -202,6 +229,8 @@ class SetupTests(unittest.TestCase):
                 self.claude.unlink()
 
     def test_conflicting_external_links_are_preserved(self):
+        # A live link elsewhere is kept; a dangling one holds nothing and is
+        # replaced with the link setup wanted there.
         self.claude.mkdir()
         for exists in (True, False):
             with self.subTest(exists=exists):
@@ -211,8 +240,12 @@ class SetupTests(unittest.TestCase):
                 link = self.claude / "shared-one"
                 link.symlink_to(target, target_is_directory=True)
                 result = self.run_setup("--sync")
-                self.assertIn("left untouched", result.stderr)
-                self.assertEqual(link.readlink(), target)
+                if exists:
+                    self.assertIn("left untouched", result.stderr)
+                    self.assertEqual(link.readlink(), target)
+                else:
+                    self.assertNotIn("left untouched", result.stderr)
+                    self.assertEqual(link.readlink(), self.shared / "shared-one")
                 link.unlink()
 
     def test_file_in_place_of_root_is_preserved(self):

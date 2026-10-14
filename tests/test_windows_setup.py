@@ -159,6 +159,21 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertEqual(unrelated.resolve(), external.resolve())
         self.assertTrue(self.is_junction(self.claude / "new-skill"))
 
+    def test_sync_from_moved_clone_replaces_dangling_junctions(self):
+        self.run_setup()
+        link = self.shared / "shared-one"
+        self.assertTrue(self.is_junction(link))
+        moved = self.base / "moved"
+        self.repo.rename(moved)
+        self.repo = moved
+        self.assertFalse(link.exists())
+        self.run_setup("--sync")
+        self.assertTrue(self.is_junction(link))
+        self.assertEqual(link.resolve(), (moved / "skills/shared-one").resolve())
+        claude_link = self.claude / "shared-one"
+        self.assertTrue(self.is_junction(claude_link))
+        self.assertEqual(claude_link.resolve(), (moved / "skills/shared-one").resolve())
+
 
 if __name__ == "__main__":
     unittest.main()

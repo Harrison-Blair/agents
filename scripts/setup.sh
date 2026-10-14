@@ -89,10 +89,12 @@ link_target() {
 # symlink only needs unlinking.
 unlink_dir() {
   if [ -L "$1" ]; then
-    rm "$1"
-  else
-    MSYS_NO_PATHCONV=1 cmd /c rmdir "$(cygpath -w "$1")" >/dev/null
+    # Git Bash reports a junction as a symlink too; when rm cannot take it,
+    # fall through to the rmdir a junction always accepts.
+    rm "$1" 2>/dev/null && return 0
+    is_windows || return 1
   fi
+  MSYS_NO_PATHCONV=1 cmd /c rmdir "$(cygpath -w "$1")" >/dev/null
 }
 
 # prune_junctions DIR PREFIX: the Windows counterpart of the broken-symlink
@@ -119,6 +121,9 @@ prune_junctions() {
 }
 
 # link_dir LINK TARGET: create a directory link; never delete anything real.
+# A dangling link in the way -- one left by a clone that moved or was deleted
+# -- holds nothing of its own and is replaced; a live link elsewhere and any
+# real directory are left alone.
 link_dir() {
   local link="$1" target="$2"
   [ -d "$target" ] || { echo "skip: missing target $target" >&2; return 1; }
@@ -126,8 +131,13 @@ link_dir() {
     if is_link "$link" && [ "$(resolve "$link")" = "$(resolve "$target")" ]; then
       return 0
     fi
-    echo "warn: $link exists and is not a link to $target; left untouched" >&2
-    return 1
+    if is_link "$link" && [ ! -e "$link" ]; then
+      unlink_dir "$link" || { echo "warn: could not remove dangling link $link" >&2; return 1; }
+      echo "relinked: $(basename "$link")"
+    else
+      echo "warn: $link exists and is not a link to $target; left untouched" >&2
+      return 1
+    fi
   fi
   mkdir -p "$(dirname "$link")"
   if is_windows; then

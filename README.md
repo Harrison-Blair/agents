@@ -63,7 +63,8 @@ absent:
   local folders are preserved. An older whole-directory link to
   `~/.agents/skills` is automatically replaced with individual links without
   changing the shared contents. Unrelated directory links are left untouched
-  with a warning.
+  with a warning, except a dangling one in a skill's place, which a clone that
+  moved or was deleted left behind: that is replaced and reported as `relinked`.
 - Links each Pi extension in `pi/` into `~/.pi/agent/extensions/<name>`.
 - Writes a small wrapper into `~/.local/bin` for every command a skill ships in
   `skills/<name>/bin/`, so agents in any harness run it by its bare name.
