@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = Path(__file__).resolve().parents[1] / "statusline"
 sys.path.insert(0, str(HERE))
@@ -481,6 +482,75 @@ theme = "test"
             self.assertEqual(target.read_text(encoding="utf-8"), first)
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
             self.assertTrue(statusline.check_codex(target, config))
+
+    def run_sync(self, target: Path):
+        config = statusline.load_config(HERE / "config.json")
+        err = io.StringIO()
+        with unittest.mock.patch.object(sys, "stderr", err):
+            code = statusline.main(
+                ["--config", str(HERE / "config.json"), "sync", "codex",
+                 "--target", str(target)]
+            )
+        return code, err.getvalue(), statusline.codex_status_line(config)
+
+    def assert_entry_printed(self, stderr: str, fields: list[str]) -> None:
+        entry = "[tui]\nstatus_line = " + json.dumps(fields, separators=(", ", ": "))
+        self.assertTrue(stderr.endswith(entry + "\n"), stderr)
+        self.assertEqual(statusline.tomllib.loads(entry)["tui"]["status_line"], fields)
+
+    def test_dangling_link_is_left_alone_and_entry_printed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            gone = Path(directory) / "gone.toml"
+            target = Path(directory) / "config.toml"
+            target.symlink_to(gone)
+            code, stderr, fields = self.run_sync(target)
+            self.assertNotEqual(code, 0)
+            self.assertIn(f"{target} is a dangling link; left alone", stderr)
+            self.assert_entry_printed(stderr, fields)
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.readlink(), gone)
+            self.assertFalse(gone.exists())
+            self.assertEqual(os.listdir(directory), ["config.toml"])
+
+    def test_directory_target_is_unchanged_and_entry_printed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "config.toml"
+            target.mkdir()
+            (target / "keep").write_text("inside\n")
+            code, stderr, fields = self.run_sync(target)
+            self.assertNotEqual(code, 0)
+            self.assertIn("could not read Codex config", stderr)
+            self.assert_entry_printed(stderr, fields)
+            self.assertEqual(os.listdir(target), ["keep"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads mode-000 files")
+    def test_unreadable_file_is_unchanged_and_entry_printed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "config.toml"
+            target.write_text('model = "keep"\n', encoding="utf-8")
+            target.chmod(0)
+            try:
+                code, stderr, fields = self.run_sync(target)
+            finally:
+                target.chmod(0o600)
+            self.assertNotEqual(code, 0)
+            self.assertIn("could not read Codex config", stderr)
+            self.assert_entry_printed(stderr, fields)
+            self.assertEqual(target.read_text(encoding="utf-8"), 'model = "keep"\n')
+
+    def test_link_to_existing_file_is_rewritten_through_the_link(self) -> None:
+        config = statusline.load_config(HERE / "config.json")
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / "real.toml"
+            real.write_text('model = "gpt-test"\n', encoding="utf-8")
+            target = Path(directory) / "config.toml"
+            target.symlink_to(real)
+            code, _, _ = self.run_sync(target)
+            self.assertEqual(code, 0)
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.readlink(), real)
+            self.assertTrue(statusline.check_codex(real, config))
+            self.assertIn('model = "gpt-test"', real.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

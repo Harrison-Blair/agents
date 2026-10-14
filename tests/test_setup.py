@@ -1355,6 +1355,17 @@ link_agents_md
                     self.assertIn("add this to it by hand", result.stderr)
                     self.assertIn('"statusLine"', result.stderr)
 
+    def test_dangling_codex_config_toml_is_left_alone(self):
+        (self.home / ".codex").mkdir()
+        toml = self.home / ".codex/config.toml"
+        toml.symlink_to(self.base / "gone.toml")
+        result = self.run_setup()
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("warn: Codex status line not synced", result.stderr)
+        self.assertTrue(toml.is_symlink())
+        self.assertFalse(toml.exists())
+        self.assertEqual(toml.readlink(), self.base / "gone.toml")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,4 +97,5 @@ always passes this directory's `config.json` and `--target` explicitly.
 Otherwise `AI_STATUSLINE_CONFIG` and `CODEX_HOME` are honoured. `sync codex`
 writes atomically, preserves the existing file mode, and is idempotent. It
 refuses ambiguous TOML rather than overwriting multiple or dotted
-`tui.status_line` definitions.
+`tui.status_line` definitions. A dangling link, directory, or unreadable file at the
+target is left alone and the `[tui]` entry is printed for pasting by hand.

@@ -69,6 +69,14 @@ class ConfigError(ValueError):
     """Raised when the shared or provider configuration is invalid."""
 
 
+class CodexReadError(ConfigError):
+    """Codex config left alone; carries the entry to paste by hand."""
+
+    def __init__(self, message: str, entry: str) -> None:
+        super().__init__(message)
+        self.entry = entry
+
+
 def default_shared_config_path() -> Path:
     override = os.environ.get("AI_STATUSLINE_CONFIG")
     if override:
@@ -535,7 +543,7 @@ def update_codex_toml(text: str, fields: list[str]) -> str:
             "ambiguous Codex config: expected at most one [tui] status_line assignment"
         )
 
-    assignment = f"status_line = {json.dumps(fields, separators=(', ', ': '))}{newline}"
+    assignment = f"{codex_assignment(fields)}{newline}"
 
     if status_assignments:
         start, end = status_assignments[0]
@@ -558,6 +566,10 @@ def update_codex_toml(text: str, fields: list[str]) -> str:
     if reparsed.get("tui", {}).get("status_line") != fields:
         raise ConfigError("generated Codex status_line did not validate")
     return updated
+
+
+def codex_assignment(fields: list[str]) -> str:
+    return f"status_line = {json.dumps(fields, separators=(', ', ': '))}"
 
 
 def write_atomic(path: Path, content: str) -> None:
@@ -589,17 +601,23 @@ def write_atomic(path: Path, content: str) -> None:
 
 
 def sync_codex(path: Path, config: dict[str, Any]) -> bool:
+    fields = codex_status_line(config)
+    entry = f"[tui]\n{codex_assignment(fields)}"
+    if path.is_symlink() and not path.exists():
+        raise CodexReadError(f"{path} is a dangling link; left alone", entry)
     try:
         original = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         original = ""
     except OSError as exc:
-        raise ConfigError(f"could not read Codex config {path}: {exc}") from exc
+        raise CodexReadError(
+            f"could not read Codex config {path}: {exc}", entry
+        ) from exc
 
-    updated = update_codex_toml(original, codex_status_line(config))
+    updated = update_codex_toml(original, fields)
     if updated == original:
         return False
-    write_atomic(path, updated)
+    write_atomic(path.resolve(), updated)
     return True
 
 
@@ -661,6 +679,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if in_sync else 1
     except ConfigError as exc:
         print(f"ai-statusline: {exc}", file=sys.stderr)
+        if isinstance(exc, CodexReadError):
+            print(exc.entry, file=sys.stderr)
         return 2
 
 
