@@ -1299,5 +1299,62 @@ link_agents_md
         self.assertIn("add this to it by hand", result.stderr)
 
 
+    def test_unreadable_config_paths_warn_and_are_left_alone(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".cursor").mkdir()
+        claude, codex, cursor = (self.home / d for d in (".claude", ".codex", ".cursor"))
+        # path -> (hook merge reads it, statusLine reader reads it)
+        files = {claude / "settings.json": (True, True), codex / "hooks.json": (True, True),  # statusLine pass drops the retired hook
+                 cursor / "hooks.json": (True, False), cursor / "cli-config.json": (False, True)}
+        root = os.geteuid() == 0
+        for kind in ("directory", "unreadable", "dangling"):
+            if kind == "unreadable" and root:
+                continue
+            for mode in ("setup", "--sync"):
+                with self.subTest(kind=kind, mode=mode):
+                    for path in files:
+                        if path.is_symlink() or path.is_file():
+                            path.chmod(0o644) if path.is_file() else None
+                            path.unlink()
+                        elif path.is_dir():
+                            shutil.rmtree(path)
+                    for path in files:
+                        if kind == "directory":
+                            path.mkdir()
+                            (path / "keep").write_text("inside\n")
+                        elif kind == "unreadable":
+                            path.write_text("{}\n")
+                            path.chmod(0)
+                        else:
+                            path.symlink_to(self.base / "gone.json")
+                    snapshot = {p: (os.readlink(p) if p.is_symlink() else None) for p in files}
+                    try:
+                        result = self.run_setup(mode)
+                    finally:
+                        modes = {p: p.stat().st_mode & 0o777 for p in files if p.is_file()}
+                        for path in modes:
+                            path.chmod(0o644)
+                    self.assertNotIn("Traceback", result.stderr)
+                    for path, (hooks, status) in files.items():
+                        line = ("warn: %s is a dangling link; " % path
+                                if kind == "dangling" else "warn: cannot read %s: " % path)
+                        count = int(hooks) + int(status)
+                        self.assertEqual(
+                            len([l for l in result.stderr.splitlines() if l.startswith(line)]),
+                            count, (path, result.stderr))
+                        if kind == "dangling":
+                            self.assertTrue(path.is_symlink())
+                            self.assertEqual(os.readlink(path), snapshot[path])
+                            self.assertFalse(path.exists())
+                        elif kind == "directory":
+                            self.assertTrue(path.is_dir())
+                            self.assertEqual([c.name for c in path.iterdir()], ["keep"])
+                        else:
+                            self.assertEqual(modes[path], 0)
+                            self.assertEqual(path.read_text(), "{}\n")
+                    self.assertIn("add this to it by hand", result.stderr)
+                    self.assertIn('"statusLine"', result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -552,9 +552,9 @@ def group_clone(group):
     return clones[0]
 
 
-def give_up(reason):
+def give_up(reason, headline=None):
     """Leave the file as it is and say what to change in it by hand."""
-    print("warn: %s %s; left alone" % (path, reason), file=sys.stderr)
+    print(headline or "warn: %s %s; left alone" % (path, reason), file=sys.stderr)
     if removing:
         print("      delete the entry running %s from it by hand"
               % os.environ["SYNC_CMD"], file=sys.stderr)
@@ -575,11 +575,15 @@ if self_clone is None:
     sys.exit(0)
 
 data = {}
+if os.path.islink(path) and not os.path.exists(path):
+    give_up("is a dangling link")  # not a missing file: writing would replace the link
 try:
     if os.path.exists(path) and os.path.getsize(path) > 0:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
-except (OSError, ValueError) as exc:
+except OSError as exc:
+    give_up("", "warn: cannot read %s: %s" % (path, exc.strerror or exc))
+except ValueError as exc:
     give_up("is not readable JSON (%s)" % exc)
 if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
     give_up("has no hooks object")
@@ -705,8 +709,9 @@ if (-not $selfClone) {
   [Console]::Error.WriteLine("warn: unrecognized sync command; $Path left alone")
   exit 0
 }
-function Stop-Unusable($reason) {
-  [Console]::Error.WriteLine("warn: $Path $reason; left alone")
+function Stop-Unusable($reason, $Headline) {
+  if (-not $Headline) { $Headline = "warn: $Path $reason; left alone" }
+  [Console]::Error.WriteLine($Headline)
   if ($removing) {
     [Console]::Error.WriteLine("      delete the entry running $($env:SYNC_CMD) from it by hand")
   } else {
@@ -715,10 +720,14 @@ function Stop-Unusable($reason) {
   exit 0
 }
 $data = [pscustomobject]@{}
+$item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+if ($item -and $item.LinkType -and -not (Test-Path -LiteralPath $Path)) { Stop-Unusable 'is a dangling link' }
 try {
   if ((Test-Path -LiteralPath $Path) -and (Get-Item -LiteralPath $Path).Length -gt 0) {
     $data = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
   }
+} catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+  Stop-Unusable 'is not readable JSON' -Headline "warn: cannot read ${Path}: $($_.Exception.Message)"
 } catch {
   Stop-Unusable 'is not readable JSON'
 }
@@ -854,22 +863,26 @@ LEGACY_RE = re.compile(
     r"""/\.claude/statusline-command\.sh\1\s*$"""
 )
 
+def give_up(reason, headline=None):
+    """Leave the file as it is; when setting, print the entry to paste."""
+    print(headline or "warn: %s %s; statusLine left alone" % (path, reason), file=sys.stderr)
+    if setting:
+        print("      add this to it by hand: %s" % json.dumps(
+            {"statusLine": {"type": "command", "command": status_cmd}}), file=sys.stderr)
+    sys.exit(1)
+
+
+if os.path.islink(path) and not os.path.exists(path):
+    give_up("is a dangling link")  # not a missing file: writing would replace the link
 try:
     with open(path, encoding="utf-8") as handle:
         original = handle.read()
 except FileNotFoundError:
     original = None
+except OSError as exc:
+    give_up("", "warn: cannot read %s: %s" % (path, exc.strerror or exc))
 if original is None and not setting:
     sys.exit(0)
-
-
-def give_up(reason):
-    """Leave the file as it is; when setting, print the entry to paste."""
-    print("warn: %s %s; statusLine left alone" % (path, reason), file=sys.stderr)
-    if setting:
-        print("      add this to it by hand: %s" % json.dumps(
-            {"statusLine": {"type": "command", "command": status_cmd}}), file=sys.stderr)
-    sys.exit(1)
 
 
 try:
