@@ -33,10 +33,13 @@ Present a round in two steps: context as text, then the questions.
 - **Per question:** a `## {N}. {Question}` heading followed by short bold-labeled sections. Use markdown emphasis to highlight the key fact or tradeoff. Omit empty sections.
   - **Now** or **Known** -- the relevant facts, with sources.
   - **Picture** -- a small picture built from the rules and templates under Pictures: a markdown table, or line art in a fenced code block.
+  - **When you'll encounter this** -- the triggering action or condition, its cause when known, where or when it occurs in the user's workflow, and what the affected user would notice. State whether it is routine or conditional only when evidence supports that distinction.
   - **Why it matters** -- the consequences and main tradeoffs, plus any assumption or uncertainty that could change the choice.
-  - **Other options** -- viable options beyond the fourth, if any.
+  - **Other options** -- viable answers that do not fit in the response options, if any, including experiments. Explain how the user can choose them in a free-text reply.
 
-**2. Then ask.** If the harness provides a structured question tool, ask through it after the text. Keep each question short and give each option a one-line reason. Put the recommended option first and mark it recommended. Offer up to 4 options; name any further viable options in the context text. If no question tool is available, list the options under each question's section, lettered A, B, C, and invite a reply such as `1A, 2B`.
+**2. Then ask.** If the harness provides a structured question tool, ask through it after the text. Keep each question short and give each option a one-line reason. Put the recommended decision option first and mark it recommended. Offer at most 4 total options, or fewer if the tool's limit is lower. Always reserve the last option for `Explain more -- explain the scenario and choices before I decide`, including on the final confirmation question. Put any further viable answers in **Other options**. If no question tool is available, list the options under each question's section, lettered A, B, C, and invite a reply such as `1A, 2B`.
+
+When the user selects **Explain more**, explain the scenario, unfamiliar terms, and practical consequences in simpler language. Address any specific confusion they mention, then re-ask the same unresolved question with its options. Preserve settled answers; requesting clarification does not settle or defer a decision. For final confirmation, explain the summary and ask for confirmation again.
 
 ## Writing questions
 
@@ -46,7 +49,9 @@ Present a round in two steps: context as text, then the questions.
 
 **Give enough context to judge.** Explain why the decision matters to the user's goal and what each choice leads to in practice. Scale the detail to the decision rather than repeating the question or the recommendation.
 
-**Offer every viable answer.** Include each genuinely workable option, not just two. Always recommend one and say why in a sentence; give each alternative a sentence on when it would be the better choice. The user may answer with their own option.
+**Consider when it happens.** Before presenting each question, assess whether the behavior, issue, fix, or tradeoff has a relevant encounter scenario. If so, include **When you'll encounter this** with a concrete trigger and user-visible experience. State unknown triggers, causes, or frequency explicitly rather than inventing them. Omit the section when it does not apply. This applies to design choices as well as issues and fixes.
+
+**Offer every viable answer.** Include each genuinely workable answer in the response options or **Other options**, while reserving the clarification option. Always recommend one decision option and say why in a sentence; give each alternative a sentence on when it would be the better choice. The user may answer with their own option.
 
 ## Pictures
 
@@ -134,8 +139,14 @@ Context as text:
 | per clone | <clone>/.sync.lock   | nobody; clones run together |
 | global    | ~/.agents/.sync.lock | every clone takes turns     |
 
+**When you'll encounter this**
+When you start a sync in a second clone while the first is still running, a per-clone lock lets both proceed. If both write the same shared files, their writes can overlap; a global lock makes the second sync wait. How often this happens depends on whether you run overlapping syncs from multiple clones.
+
 **Why it matters**
 The lock decides **which syncs wait for each other**. Per-clone locks let clones sync in parallel but leave *shared files* unprotected; a global lock makes every clone take turns.
+
+**Other options**
+Test it first: run two real syncs against a spare clone (~5 min, writes files). Choose this by replying `Test it first` if you want evidence before deciding.
 ````
 
 Then the question tool:
@@ -145,7 +156,7 @@ Where should the lock file live?
 - Per clone (recommended) -- matches today's location and keeps clones independent
 - Global under ~/.agents -- better if clones write shared files
 - No lock; retry on conflict -- better if syncs are rare and short
-- Test it first: run two real syncs against a spare clone (~5 min, writes files)
+- Explain more -- explain the scenario and choices before I decide
 ```
 
 ## Wrapping up
