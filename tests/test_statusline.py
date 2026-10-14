@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -124,7 +125,7 @@ class RendererTests(unittest.TestCase):
         )
 
     def test_malformed_json_becomes_empty_payload(self) -> None:
-        payload = statusline.parse_json_stream(io.StringIO("{not json"))
+        payload = statusline.parse_json_stream(io.BytesIO(b"{not json"))
         self.assertEqual(statusline.render_claude(payload, self.config), "")
 
     def test_codex_mapping_follows_shared_order(self) -> None:
@@ -208,6 +209,203 @@ class RendererTests(unittest.TestCase):
             statusline.render_claude(payload, self.config, now=self.NOW),
             "Opus\ncache: cold",
         )
+
+
+MIB = 1024 * 1024
+
+# Cursor's documented sample payload (~/.cursor/skills-cursor/statusline/SKILL.md).
+CURSOR_SAMPLE = {
+    "session_id": "abc123",
+    "session_name": "my session",
+    "transcript_path": "/path/to/transcript.jsonl",
+    "render_width_chars": 120,
+    "cwd": "/Users/me/project",
+    "autorun": False,
+    "model": {
+        "id": "claude-4-opus",
+        "display_name": "Claude 4 Opus",
+        "param_summary": "(Thinking)",
+        "max_mode": True,
+    },
+    "workspace": {
+        "current_dir": "/Users/me/project",
+        "project_dir": "/Users/me/project/.cursor/transcripts",
+        "added_dirs": [],
+    },
+    "version": "1.2.3",
+    "output_style": {"name": "default"},
+    "context_window": {
+        "total_input_tokens": 15234,
+        "total_output_tokens": None,
+        "context_window_size": 200000,
+        "used_percentage": 34.5,
+        "remaining_percentage": 65.5,
+        "current_usage": None,
+    },
+    "vim": {"mode": "NORMAL"},
+    "worktree": {
+        "name": "my-feature",
+        "path": "/Users/me/.cursor/worktrees/repo/my-feature",
+    },
+}
+
+# A payload that sets every field the renderers read.
+FULL_PAYLOAD = {
+    "model": {"display_name": "Opus", "id": "opus"},
+    "effort": {"level": "high"},
+    "context_window": {
+        "context_window_size": 200_000,
+        "current_usage": {
+            "input_tokens": 1,
+            "cache_creation_input_tokens": 1,
+            "cache_read_input_tokens": 1,
+        },
+    },
+    "rate_limits": {
+        "five_hour": {"used_percentage": 10, "resets_at": 1_800_000_000},
+        "seven_day": {"remaining_percentage": 10, "resets_at": 1_800_000_000},
+    },
+    "cwd": "/nonexistent/project",
+    "workspace": {"current_dir": "/nonexistent/project", "project_dir": "/nonexistent/p"},
+    "session_name": "name",
+    "transcript_path": "/nonexistent/t.jsonl",
+    "cost": {"total_cost_usd": 1, "total_lines_added": 1, "total_lines_removed": 1},
+    "prompt_cache": {"caching_observed": True, "warm": True, "expires_at": 1_800_000_000},
+}
+
+WRONG_VALUES = [None, True, 5, -1, 1e308, 10**400, "", "x", [], [1], {}]
+
+
+def _paths(value: object, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    paths = [prefix] if prefix else []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            paths.extend(_paths(child, prefix + (key,)))
+    return paths
+
+
+def _with(payload: dict, path: tuple[str, ...], value: object) -> dict:
+    result = copy.deepcopy(payload)
+    target = result
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    return result
+
+
+class CursorRendererTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = copy.deepcopy(statusline.load_config(HERE / "config.json"))
+        self.config["colors"]["enabled"] = False
+
+    def test_sample_payload_labels_project_from_current_dir(self) -> None:
+        self.assertEqual(
+            statusline.render_cursor(CURSOR_SAMPLE, self.config),
+            "Claude 4 Opus\nproject\nmy session",
+        )
+
+    def test_project_label_falls_back_to_cwd(self) -> None:
+        for workspace in ({"project_dir": "/x/transcripts"}, "bad", {"current_dir": 5}):
+            payload = {"cwd": "/Users/me/fallback", "workspace": workspace}
+            self.assertEqual(
+                statusline.render_cursor(payload, self.config), "fallback", workspace
+            )
+
+    def test_session_name_renders_as_for_claude(self) -> None:
+        payload = {"session_name": "my session"}
+        self.assertEqual(statusline.render_cursor(payload, self.config), "my session")
+        self.assertEqual(
+            statusline.render_cursor(payload, self.config),
+            statusline.render_claude(payload, self.config),
+        )
+
+    def test_extra_cursor_fields_are_ignored(self) -> None:
+        stripped = copy.deepcopy(CURSOR_SAMPLE)
+        for key in ("render_width_chars", "autorun"):
+            del stripped[key]
+        for key in ("param_summary", "max_mode"):
+            del stripped["model"][key]
+        self.assertEqual(
+            statusline.render_cursor(CURSOR_SAMPLE, self.config),
+            statusline.render_cursor(stripped, self.config),
+        )
+
+    def test_wrong_typed_fields_never_crash(self) -> None:
+        for render in (statusline.render_claude, statusline.render_cursor):
+            for top in WRONG_VALUES:
+                self.assertIsInstance(render(top, self.config), str)
+            for path in _paths(FULL_PAYLOAD):
+                for value in WRONG_VALUES:
+                    with self.subTest(render=render.__name__, path=path, value=value):
+                        payload = _with(FULL_PAYLOAD, path, value)
+                        self.assertIsInstance(render(payload, self.config), str)
+
+
+class BoundedStdinTests(unittest.TestCase):
+    def test_reads_at_most_one_mebibyte(self) -> None:
+        stream = io.BytesIO(b"{}" + b" " * (2 * MIB))
+        self.assertEqual(statusline.parse_json_stream(stream), {})
+        self.assertLessEqual(stream.tell(), MIB + 1)
+
+    def test_cap_boundaries(self) -> None:
+        body = b'{"session_name": "s"}'
+        for size, expected in (
+            (MIB - 1, {"session_name": "s"}),
+            (MIB, {"session_name": "s"}),
+            (MIB + 1, {}),
+            (2 * MIB, {}),
+        ):
+            stream = io.BytesIO(body + b" " * (size - len(body)))
+            self.assertEqual(statusline.parse_json_stream(stream), expected, size)
+
+    def test_unparsable_input_becomes_empty_payload(self) -> None:
+        for raw in (
+            b"",
+            b"{not json",
+            b"\xff\xfe\x00",
+            b"[" * 100_000,
+            b"1" * 5_000,
+        ):
+            self.assertEqual(statusline.parse_json_stream(io.BytesIO(raw)), {}, raw[:20])
+
+    def run_cli(self, provider: str, stdin: bytes) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(HERE / "statusline.py"),
+                "--config",
+                str(HERE / "config.json"),
+                "render",
+                provider,
+            ],
+            input=stdin,
+            capture_output=True,
+            timeout=30,
+        )
+
+    def test_cli_exits_zero_with_minimal_line_on_bad_stdin(self) -> None:
+        cases = {
+            "empty object": b"{}",
+            "empty stdin": b"",
+            "non-JSON": b"not json",
+            "null": b"null",
+            "array": b"[1, 2]",
+            "number": b"5",
+            "2 MiB": b'{"session_name": "big"}' + b" " * (2 * MIB),
+        }
+        for provider in ("claude", "cursor"):
+            for name, stdin in cases.items():
+                with self.subTest(provider=provider, case=name):
+                    result = self.run_cli(provider, stdin)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, b"")
+                    self.assertEqual(result.stderr, b"")
+
+    def test_cli_render_cursor_sample(self) -> None:
+        result = self.run_cli("cursor", json.dumps(CURSOR_SAMPLE).encode())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plain = re.sub(rb"\x1b\[[0-9;]*m", b"", result.stdout)
+        self.assertEqual(plain, b"Claude 4 Opus\nproject\nmy session")
 
 
 class CodexSyncTests(unittest.TestCase):

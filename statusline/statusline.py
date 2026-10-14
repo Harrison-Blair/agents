@@ -58,6 +58,8 @@ ANSI = {
 }
 RESET = "\033[0m"
 
+STDIN_LIMIT = 1024 * 1024
+
 TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 STATUS_RE = re.compile(r"^(\s*)status_line\s*=")
 DOTTED_STATUS_RE = re.compile(r"^\s*tui\.status_line\s*=")
@@ -147,8 +149,13 @@ def load_config(path: Path) -> dict[str, Any]:
 def _number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)) and math.isfinite(float(value)):
-        return float(value)
+    if isinstance(value, (int, float)):
+        try:
+            number = float(value)
+        except OverflowError:
+            return None
+        if math.isfinite(number):
+            return number
     return None
 
 
@@ -304,7 +311,10 @@ def _clock(epoch: Any, now: datetime) -> str | None:
     number = _number(epoch)
     if number is None:
         return None
-    when = datetime.fromtimestamp(number, tz=now.tzinfo)
+    try:
+        when = datetime.fromtimestamp(number, tz=now.tzinfo)
+    except (OverflowError, OSError, ValueError):
+        return None
     clock = when.strftime("%-I:%M%p").lower()
     if when.date() == now.date():
         return clock
@@ -423,10 +433,28 @@ def render_claude(
     return "\n".join(rendered_lines)
 
 
+def render_cursor(
+    data: Any, config: dict[str, Any], now: datetime | None = None
+) -> str:
+    """Render Cursor's payload, whose workspace.project_dir is its transcripts directory."""
+    if not isinstance(data, dict):
+        data = {}
+    workspace = data.get("workspace")
+    current_dir = workspace.get("current_dir") if isinstance(workspace, dict) else None
+    if not isinstance(current_dir, str) or not current_dir:
+        current_dir = None
+    data = {**data, "workspace": {"current_dir": current_dir, "project_dir": current_dir}}
+    return render_claude(data, config, now)
+
+
 def parse_json_stream(stream: Any) -> Any:
+    """Read at most STDIN_LIMIT bytes; larger, empty, or invalid input is {}."""
     try:
-        return json.load(stream)
-    except (json.JSONDecodeError, OSError, TypeError):
+        raw = stream.read(STDIN_LIMIT + 1)
+        if len(raw) > STDIN_LIMIT:
+            return {}
+        return json.loads(raw)
+    except (ValueError, RecursionError, OSError, TypeError):
         return {}
 
 
@@ -594,7 +622,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     render = subparsers.add_parser("render", help="render provider session data")
-    render.add_argument("provider", choices=("claude",))
+    render.add_argument("provider", choices=("claude", "cursor"))
 
     for command in ("sync", "check"):
         provider = subparsers.add_parser(
@@ -615,7 +643,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config.expanduser())
         if args.command == "render":
-            print(render_claude(parse_json_stream(sys.stdin), config), end="")
+            render = render_cursor if args.provider == "cursor" else render_claude
+            print(render(parse_json_stream(sys.stdin.buffer), config), end="")
             return 0
 
         target = args.target.expanduser()
