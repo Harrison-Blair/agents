@@ -67,6 +67,8 @@ Strong success criteria support independent execution. Ask when a decision mater
 
 ## Test Verification
 
+**No tautological tests.** Test observable behavior against independently defined expectations. Do not reproduce the implementation’s logic to calculate expected results, or mock the behavior being tested and then assert the mock’s configured output. Mock only necessary external dependencies.
+
 A test counts only if it fails when the behavior breaks and passes when the behavior is correct.
 
 - For a bug fix, run the new test against the unfixed or deliberately broken behavior and confirm it fails, then confirm it passes with the fix.
