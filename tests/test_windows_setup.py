@@ -255,7 +255,7 @@ merge_hooks "$1" "$REPO/hooks/cursor.json" "$2"
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = json.loads(hooks.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
         self.assertEqual(entries[0], herdr)
-        self.assertEqual(len(entries), 2, entries)
+        self.assertEqual(len(entries), 2, [entries, result.stdout, result.stderr])
         self.assertTrue(entries[1]["command"].endswith('/scripts/setup.sh" --sync'))
         result = self.run_powershell_merge(hooks, "remove")
         self.assertEqual(json.loads(hooks.read_text(encoding="utf-8"))["hooks"]["sessionStart"],

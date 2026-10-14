@@ -672,9 +672,11 @@ PY
   fi
 
   if command -v powershell >/dev/null 2>&1; then
+    # The whole script runs as one block: -Command - reads stdin like a console,
+    # where a multi-line statement waits for a blank line that never comes.
     SNIPPET="$snippet" SYNC_CMD="$cmd" HOOK_ACTION="$action" \
       HOOK_FILE="$(cygpath -w "$file" 2>/dev/null || echo "$file")" \
-      powershell -NoProfile -Command - <<'PS'
+      powershell -NoProfile -Command '& ([scriptblock]::Create([Console]::In.ReadToEnd()))' <<'PS'
 $Path = $env:HOOK_FILE
 $tpl = $env:SNIPPET | ConvertFrom-Json
 $removing = $env:HOOK_ACTION -eq 'remove'
