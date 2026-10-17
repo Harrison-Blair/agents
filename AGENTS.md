@@ -10,6 +10,7 @@
 - Parallelize independent work, including with useful available subagents. Sequence dependent work and coordinate edits that could conflict.
 - Use task tracking when available. Keep tasks current, close completed work, and preserve enough state for a reliable handoff.
 - Ask clarifying questions when an unresolved choice would materially change the result. State assumptions and surface meaningful tradeoffs.
+- Avoid the telltale-AI contrast phrasing — "it's not X, it's Y" or "it's a X, not a Y". Say what something is plainly, without the rhetorical flip.
 
 ## Work Boundaries and Verification
 
