@@ -49,6 +49,12 @@ jobs:
           python-version: '3.13'
       - name: Run tests
         run: python -B -m unittest discover -s tests -v
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+      - name: Run Pi extension tests
+        run: node --test tests/test_ask_user_question.ts
       - name: Check shell syntax
         run: bash -n scripts/setup.sh && sh -n scripts/setup.sh
       - name: Check whitespace

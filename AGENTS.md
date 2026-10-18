@@ -13,11 +13,12 @@ Never distribute the root file as global instructions.
 - `hooks/` contains session-start templates for Claude Code, Codex, and Cursor.
 - `pi/` contains Pi extensions.
 - `statusline/` contains the Python renderer and shared configuration.
-- `tests/` contains Python regression tests.
+- `tests/` contains Python regression tests and Node tests for Pi extensions.
 
 ## Development Commands
 
-Use Python 3.11 or later for the statusline. Install the pinned check dependencies:
+Use Python 3.11 or later for the statusline. Use Node.js 22.18 or later for the Pi extension tests.
+Install the pinned check dependencies:
 
 ```sh
 python3 -m pip install -r requirements-ci.txt
@@ -27,6 +28,7 @@ Run these checks before committing relevant changes:
 
 ```sh
 python3 -B -m unittest discover -s tests -v
+node --test tests/test_ask_user_question.ts
 python3 -B scripts/validate_repo.py
 bash -n scripts/setup.sh
 sh -n scripts/setup.sh
@@ -40,7 +42,7 @@ There is no separate build command.
 ## Style and Skills
 
 Use four spaces for Python indentation. Use two spaces for shell and TypeScript indentation.
-Use `snake_case` for Python functions. Name test files `test_*.py`.
+Use `snake_case` for Python functions. Name test files `test_*.py` or `test_*.ts`.
 Keep portable skill instructions independent of a harness. Put harness-specific notes in provider references.
 Use the `asd-ste100` skill when changing this guide.
 
