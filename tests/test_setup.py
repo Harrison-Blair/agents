@@ -82,7 +82,9 @@ class SetupTests(unittest.TestCase):
         (self.repo / "scripts").mkdir(parents=True)
         shutil.copytree(SOURCE / "hooks", self.repo / "hooks")
         shutil.copytree(SOURCE / "statusline", self.repo / "statusline")
-        shutil.copy2(SOURCE / "AGENTS.md", self.repo / "AGENTS.md")
+        (self.repo / "global").mkdir()
+        shutil.copy2(SOURCE / "global/AGENTS.md", self.repo / "global/AGENTS.md")
+        (self.repo / "AGENTS.md").write_text("Repository-only instructions must never be installed.\n")
         self.script = self.repo / "scripts/setup.sh"
         self.script.write_text(
             (SOURCE / "scripts/setup.sh").read_text().replace(
@@ -806,14 +808,14 @@ link_claude_skills
     def assert_agents_linked(self, repo=None):
         repo = Path(repo or self.repo)
         shared, downstream = self.agents_paths()
-        self.assertEqual(shared.readlink(), repo.resolve() / "AGENTS.md")
+        self.assertEqual(shared.readlink(), repo.resolve() / "global/AGENTS.md")
         for path in downstream:
             self.assertEqual(path.readlink(), shared, path)
-            self.assertEqual(path.read_text(), (repo / "AGENTS.md").read_text())
+            self.assertEqual(path.read_text(), (repo / "global/AGENTS.md").read_text())
 
     def marked_copy(self, repo):
         """A managed copy of the tracked AGENTS.md written for a clone."""
-        first, rest = (SOURCE / "AGENTS.md").read_text().split("\n", 1)
+        first, rest = (SOURCE / "global/AGENTS.md").read_text().split("\n", 1)
         return first.replace("<clone>", str(repo)) + "\n" + rest
 
     def snapshot(self, path):
@@ -824,8 +826,8 @@ link_claude_skills
         return ("file", path.read_bytes())
 
     def test_tracked_agents_md_carries_the_marker(self):
-        first = (SOURCE / "AGENTS.md").read_text().split("\n", 1)[0]
-        self.assertEqual(first, "<!-- Managed by the agents repository: <clone>/AGENTS.md. "
+        first = (SOURCE / "global/AGENTS.md").read_text().split("\n", 1)[0]
+        self.assertEqual(first, "<!-- Managed by the agents repository: <clone>/global/AGENTS.md. "
                                 "Edit it there; this copy is rewritten at sync. -->")
 
     def test_setup_links_agents_md_into_every_harness(self):
@@ -835,6 +837,107 @@ link_claude_skills
         result = self.run_setup("--sync")
         self.assertEqual(result.stderr, "")
         self.assert_agents_linked()
+
+    def legacy_marked_copy(self, repo):
+        return self.marked_copy(repo).replace("/global/AGENTS.md. Edit it there", "/AGENTS.md. Edit it there", 1)
+
+    def test_setup_and_sync_migrate_legacy_instruction_links(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                shared.symlink_to(self.repo.resolve() / "AGENTS.md")
+                for path in downstream:
+                    path.symlink_to(shared)
+                self.run_setup(mode)
+                self.assert_agents_linked()
+                self.assertEqual(self.run_setup("--sync").stderr, "")
+                for path in (shared, *downstream):
+                    path.unlink()
+
+    def test_legacy_direct_harness_links_migrate(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        shared.symlink_to(self.repo.resolve() / "AGENTS.md")
+        for path in downstream:
+            path.symlink_to(self.repo.resolve() / "AGENTS.md")
+        self.run_setup("--sync")
+        self.assert_agents_linked()
+
+    def test_setup_and_sync_migrate_legacy_instruction_copies(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                for path in (shared, *downstream):
+                    path.write_text(self.legacy_marked_copy(self.repo.resolve()))
+                self.run_setup(mode)
+                self.assert_agents_linked()
+                for path in (shared, *downstream):
+                    path.unlink()
+
+    def test_windows_copy_fallback_migrates_legacy_marker(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        for path in (shared, *downstream):
+            path.write_text(self.legacy_marked_copy(self.repo.resolve()))
+        result = self.run_copy_fallback()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path in (shared, *downstream):
+            self.assertEqual(path.read_text(), self.marked_copy(self.repo.resolve()))
+        self.assertEqual(self.run_copy_fallback().stderr, "")
+
+    def test_legacy_copy_in_a_clone_named_global_migrates(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        renamed = self.base / "global"
+        shutil.copytree(self.repo, renamed)
+        for path in (shared, *downstream):
+            path.write_text(self.legacy_marked_copy(renamed.resolve()))
+        result = subprocess.run(["bash", str(renamed / "scripts/setup.sh"), "--sync"],
+                                env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_agents_linked(renamed)
+
+    def test_uninstall_handles_legacy_links_and_both_copy_markers(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        for kind in ("legacy links", "legacy copies", "current copies"):
+            with self.subTest(kind=kind):
+                if kind == "legacy links":
+                    shared.symlink_to(self.repo.resolve() / "AGENTS.md")
+                    for path in downstream:
+                        path.symlink_to(shared)
+                else:
+                    content = (self.legacy_marked_copy(self.repo.resolve())
+                               if kind == "legacy copies" else self.marked_copy(self.repo.resolve()))
+                    for path in (shared, *downstream):
+                        path.write_text(content)
+                self.run_setup("--uninstall")
+                for path in (shared, *downstream):
+                    self.assertFalse(path.exists() or path.is_symlink(), path)
+
+    def test_another_live_clones_legacy_install_is_preserved(self):
+        self.add_harnesses()
+        shared, downstream = self.agents_paths()
+        other = self.base / "other-clone"
+        other.mkdir()
+        (other / "AGENTS.md").write_text("other global rules\n")
+        for kind in ("link", "copy"):
+            with self.subTest(kind=kind):
+                if kind == "link":
+                    shared.symlink_to(other / "AGENTS.md")
+                else:
+                    shared.write_text(self.legacy_marked_copy(other))
+                for path in downstream:
+                    path.write_text("local rules\n")
+                before = [self.snapshot(path) for path in (shared, *downstream)]
+                result = self.run_setup("--sync")
+                self.run_setup("--uninstall")
+                self.assertEqual([self.snapshot(path) for path in (shared, *downstream)], before)
+                self.assertIn(str(shared), result.stderr)
+                for path in (shared, *downstream):
+                    path.unlink()
 
     def test_agents_md_is_not_linked_for_a_missing_harness(self):
         self.run_setup()
@@ -928,7 +1031,7 @@ link_claude_skills
         shared, downstream = self.agents_paths()
         other = self.base / "other-clone"
         shutil.copytree(self.repo, other, symlinks=True)
-        with (other / "AGENTS.md").open("a") as handle:
+        with (other / "global/AGENTS.md").open("a") as handle:
             handle.write("other\n")
         # The other clone, set up first, owns the shared entry.
         subprocess.run(["bash", str(other / "scripts/setup.sh")], env=self.env,
@@ -960,11 +1063,11 @@ link_agents_md
     def test_windows_copy_fallback_writes_and_refreshes_marked_copies(self):
         self.add_harnesses()
         shared, downstream = self.agents_paths()
-        tracked = (self.repo / "AGENTS.md").read_text()
+        tracked = (self.repo / "global/AGENTS.md").read_text()
         # Git Bash's default `ln -s` silently copies instead of failing.
         for ln_body in ("return 1", 'cp "$2" "$3"'):
             with self.subTest(ln=ln_body):
-                (self.repo / "AGENTS.md").write_text(tracked)
+                (self.repo / "global/AGENTS.md").write_text(tracked)
                 result = self.run_copy_fallback(ln_body)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stderr.count("warn:"), 4, result.stderr)
@@ -974,7 +1077,7 @@ link_agents_md
                 # Unchanged content: nothing written, nothing said.
                 self.assertEqual(self.run_copy_fallback(ln_body).stderr, "")
                 # A content update refreshes every copy.
-                with (self.repo / "AGENTS.md").open("a") as handle:
+                with (self.repo / "global/AGENTS.md").open("a") as handle:
                     handle.write("new rule\n")
                 result = self.run_copy_fallback(ln_body)
                 self.assertEqual(result.stderr.count("warn:"), 4, result.stderr)

@@ -28,7 +28,9 @@ class WindowsSetupTests(unittest.TestCase):
         )
         shutil.copytree(Path(__file__).parents[1] / "hooks", self.repo / "hooks")
         shutil.copytree(Path(__file__).parents[1] / "statusline", self.repo / "statusline")
-        shutil.copy2(Path(__file__).parents[1] / "AGENTS.md", self.repo / "AGENTS.md")
+        (self.repo / "global").mkdir()
+        shutil.copy2(Path(__file__).parents[1] / "global/AGENTS.md", self.repo / "global/AGENTS.md")
+        (self.repo / "AGENTS.md").write_text("Repository-only instructions must never be installed.\n")
         self.add_skill(self.repo / "skills/shared-one")
         self.env = dict(os.environ)
         # Git Bash accepts drive-letter paths with forward slashes and uses HOME
@@ -183,7 +185,7 @@ class WindowsSetupTests(unittest.TestCase):
                 self.home / ".codex/AGENTS.md", self.home / ".pi/agent/AGENTS.md"]
 
     def marked_copy(self):
-        first, rest = (self.repo / "AGENTS.md").read_text(encoding="utf-8").split("\n", 1)
+        first, rest = (self.repo / "global/AGENTS.md").read_text(encoding="utf-8").split("\n", 1)
         clone = subprocess.run([self.bash, "-c", "cd \"$1\" && pwd -P", "_",
                                 self.repo.as_posix()], text=True, capture_output=True)
         return first.replace("<clone>", clone.stdout.strip()) + "\n" + rest
@@ -196,7 +198,7 @@ class WindowsSetupTests(unittest.TestCase):
         for path in paths:
             self.assertTrue(path.is_symlink(), path)
             self.assertEqual(path.read_text(encoding="utf-8"),
-                             (self.repo / "AGENTS.md").read_text(encoding="utf-8"))
+                             (self.repo / "global/AGENTS.md").read_text(encoding="utf-8"))
         self.run_setup("--uninstall")
         for path in paths:
             self.assertFalse(path.exists() or path.is_symlink(), path)
@@ -219,12 +221,44 @@ class WindowsSetupTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), self.marked_copy())
         result = self.run_setup("--sync")
         self.assertNotIn("wrote a managed copy", result.stderr)
-        with (self.repo / "AGENTS.md").open("a", encoding="utf-8") as handle:
+        with (self.repo / "global/AGENTS.md").open("a", encoding="utf-8") as handle:
             handle.write("new rule\n")
         result = self.run_setup("--sync")
         self.assertEqual(result.stderr.count("wrote a managed copy"), 4, result.stderr)
         for path in paths:
             self.assertTrue(path.read_text(encoding="utf-8").endswith("new rule\n"), path)
+        self.run_setup("--uninstall")
+        for path in paths:
+            self.assertFalse(path.exists(), path)
+
+    def test_legacy_agents_md_symlink_migrates(self):
+        paths = self.agents_paths()
+        result = self.run_setup()
+        if "wrote a managed copy" in result.stderr:
+            self.skipTest("this runner cannot create symlinks: " + result.stderr)
+        paths[0].unlink()
+        paths[0].symlink_to(self.repo / "AGENTS.md")
+        self.run_setup("--sync")
+        for path in paths:
+            self.assertEqual(path.resolve(), (self.repo / "global/AGENTS.md").resolve())
+            self.assertEqual(path.read_text(encoding="utf-8"),
+                             (self.repo / "global/AGENTS.md").read_text(encoding="utf-8"))
+        self.assertNotIn("wrote a managed copy", self.run_setup("--sync").stderr)
+
+    def test_legacy_agents_md_copies_migrate_without_symlink_rights(self):
+        paths = self.agents_paths()
+        paths[0].parent.mkdir(parents=True, exist_ok=True)
+        legacy = self.marked_copy().replace("/global/AGENTS.md. Edit it there", "/AGENTS.md. Edit it there", 1)
+        for path in paths:
+            path.write_text(legacy, encoding="utf-8")
+        shim = self.base / "no-symlinks.sh"
+        shim.write_text('ln() { return 1; }\n', encoding="utf-8")
+        self.env["BASH_ENV"] = shim.as_posix()
+        self.run_setup("--sync")
+        for path in paths:
+            self.assertFalse(path.is_symlink(), path)
+            self.assertEqual(path.read_text(encoding="utf-8"), self.marked_copy())
+        self.assertNotIn("wrote a managed copy", self.run_setup("--sync").stderr)
         self.run_setup("--uninstall")
         for path in paths:
             self.assertFalse(path.exists(), path)

@@ -14,7 +14,7 @@
 # run over to that copy, so the hook it installs names a path that keeps working.
 #
 # Skills are linked one by one into ~/.agents/skills so machine-local skills can
-# live beside them, and AGENTS.md is linked into ~/.agents and each harness.
+# live beside them, and global/AGENTS.md supplies each harness's instructions.
 # Hooks are merged into existing config files, never replaced.
 # Every statement lives in a function and the file ends with one `main "$@"`, so
 # the shell parses the whole script before a pull can replace it on disk.
@@ -271,15 +271,20 @@ copy_owner() {
     *) return 0 ;;
   esac
   line="${line#"$MANAGED_MARK"}"
-  printf '%s\n' "${line%%/AGENTS.md. Edit it there*}"
+  # A legacy clone can itself be named global; check its exact path first.
+  case "$line" in
+    "$REPO/AGENTS.md. Edit it there"*) printf '%s\n' "$REPO" ;;
+    *"/global/AGENTS.md. Edit it there"*) printf '%s\n' "${line%%/global/AGENTS.md. Edit it there*}" ;;
+    *) printf '%s\n' "${line%%/AGENTS.md. Edit it there*}" ;;
+  esac
 }
 
-# The copy written where a link cannot be: the tracked AGENTS.md with its
+# The copy written where a link cannot be: global/AGENTS.md with its
 # placeholder marker line naming this clone.
 managed_copy() {
-  printf '%s%s/AGENTS.md. Edit it there; this copy is rewritten at sync. -->\n' \
+  printf '%s%s/global/AGENTS.md. Edit it there; this copy is rewritten at sync. -->\n' \
     "$MANAGED_MARK" "$REPO"
-  tail -n +2 "$REPO/AGENTS.md"
+  tail -n +2 "$REPO/global/AGENTS.md"
 }
 
 # make_file_link LINK TARGET: put a symlink at LINK, replacing whatever is
@@ -314,21 +319,26 @@ write_copy() {
 }
 
 # link_file LINK TARGET: the one place that decides an AGENTS.md path. A link
-# to TARGET stays; a dangling link is replaced; a copy this clone (or a clone
+# to TARGET stays; a legacy link into this clone's root AGENTS.md migrates;
+# a dangling link is replaced; a copy this clone (or a clone
 # that no longer exists) wrote becomes a link, or on Windows, where a link may
 # be impossible, is refreshed. Anything else -- a live link elsewhere, a file
 # without the marker, another live clone's copy, a directory -- is left with a
 # warning and a non-zero status.
 link_file() {
-  local link="$1" target="$2" owner
+  local link="$1" target="$2" owner resolved
   if [ -L "$link" ]; then
     if [ -e "$link" ]; then
-      [ "$(resolve_file "$link")" = "$(resolve_file "$target")" ] && return 0
-      echo "warn: $link links elsewhere; left untouched" >&2
-      return 1
+      resolved="$(resolve_file "$link")"
+      [ "$resolved" = "$(resolve_file "$target")" ] && return 0
+      if [ "$resolved" != "$(resolve_file "$REPO/AGENTS.md")" ]; then
+        echo "warn: $link links elsewhere; left untouched" >&2
+        return 1
+      fi
+    else
+      rm "$link" || { echo "warn: could not remove dangling link $link" >&2; return 1; }
+      echo "relinked: $link"
     fi
-    rm "$link" || { echo "warn: could not remove dangling link $link" >&2; return 1; }
-    echo "relinked: $link"
   elif [ -e "$link" ]; then
     owner="$(copy_owner "$link")"
     if [ -z "$owner" ]; then
@@ -353,9 +363,12 @@ link_file() {
 # True when the shared AGENTS.md is this clone's: a link into it, or a copy
 # naming it. Nothing is installed or removed downstream of one that is not.
 owns_agents_md() {
+  local target
   if [ -L "$AGENTS_MD" ]; then
-    [ -e "$AGENTS_MD" ] &&
-      [ "$(resolve_file "$AGENTS_MD")" = "$(resolve_file "$REPO/AGENTS.md")" ]
+    [ -e "$AGENTS_MD" ] || return 1
+    target="$(resolve_file "$AGENTS_MD")"
+    [ "$target" = "$(resolve_file "$REPO/global/AGENTS.md")" ] ||
+      [ "$target" = "$(resolve_file "$REPO/AGENTS.md")" ]
   else
     [ "$(copy_owner "$AGENTS_MD")" = "$REPO" ]
   fi
@@ -374,7 +387,7 @@ agents_md_users() {
 # is never spread further.
 link_agents_md() {
   local dir file
-  link_file "$AGENTS_MD" "$REPO/AGENTS.md" || return 0
+  link_file "$AGENTS_MD" "$REPO/global/AGENTS.md" || return 0
   agents_md_users | while IFS='|' read -r dir file; do
     [ -d "$dir" ] || continue
     link_file "$file" "$AGENTS_MD"

@@ -1,77 +1,59 @@
-<!-- Managed by the agents repository: <clone>/AGENTS.md. Edit it there; this copy is rewritten at sync. -->
+# Repository Guidelines
 
-# Global Agent Instructions
+These instructions apply only to work in this repository.
 
-## User Preferences
+## Project Structure
 
-- I dictate with a speech-to-text tool that inserts text by pasting, so my messages often arrive as pasted content.
-- Explicit model or tool choices in the current request override stored defaults. If the requested choice is unavailable and a substitution is necessary, disclose it.
-- Commits are allowed when authorized, but never add the agent as a co-author or include a `Co-Authored-By` trailer attributing work to an agent.
-- Parallelize independent work, including with useful available subagents. Sequence dependent work and coordinate edits that could conflict.
-- Use task tracking when available. Keep tasks current, close completed work, and preserve enough state for a reliable handoff.
-- Ask clarifying questions when an unresolved choice would materially change the result. State assumptions and surface meaningful tradeoffs.
-- Avoid the telltale-AI contrast phrasing — "it's not X, it's Y" or "it's a X, not a Y". Say what something is plainly, without the rhetorical flip.
+This repository distributes agent configuration across machines and harnesses.
+`global/AGENTS.md` contains global instructions. The root `AGENTS.md` contains project instructions.
+Never distribute the root file as global instructions.
 
-## Work Boundaries and Verification
+- `scripts/setup.sh` installs, synchronizes, and removes managed configuration.
+- `skills/<name>/SKILL.md` defines each portable skill.
+- `hooks/` contains session-start templates for Claude Code, Codex, and Cursor.
+- `pi/` contains Pi extensions.
+- `statusline/` contains the Python renderer and shared configuration.
+- `tests/` contains Python regression tests.
 
-- Honor the requested phase. Investigate, plan, review, explain, or validate without implementing unless implementation is also authorized.
-- Treat suspected bugs and review findings as hypotheses. Check actual behavior and intended design before changing code.
-- Before declaring work complete, verify the actual user-visible behavior when practical, not only an indirect proxy. State any limits that remain unverified.
-- Remove temporary files, data, and resources created for the task once the result is recorded in the required format and verified, and those items are no longer needed for delivery or verification. Preserve final deliverables and pre-existing user data. Verify cleanup before declaring the task complete.
+## Development Commands
 
-## 1. Think Before Coding
+Use Python 3.11 or later for the statusline. Install the pinned check dependencies:
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+```sh
+python3 -m pip install -r requirements-ci.txt
+```
 
-Before implementing:
+Run these checks before committing relevant changes:
 
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop and name what is unclear.
+```sh
+python3 -B -m unittest discover -s tests -v
+python3 -B scripts/validate_repo.py
+bash -n scripts/setup.sh
+sh -n scripts/setup.sh
+shellcheck scripts/setup.sh
+git diff --check
+```
 
-## 2. Simplicity First
+The tests check behavior. The repository checker checks skills, metadata, and local Markdown links.
+There is no separate build command.
 
-**Write the minimum code that solves the problem. Nothing speculative.**
+## Style and Skills
 
-- Add no features beyond what was asked.
-- Avoid abstractions for single-use code.
-- Do not add flexibility or configurability that was not requested.
-- Do not add error handling for impossible scenarios.
-- If the implementation is much larger than necessary, simplify it.
+Use four spaces for Python indentation. Use two spaces for shell and TypeScript indentation.
+Use `snake_case` for Python functions. Name test files `test_*.py`.
+Keep portable skill instructions independent of a harness. Put harness-specific notes in provider references.
+Use the `asd-ste100` skill when changing this guide.
 
-## 3. Surgical Changes
+## Testing and Sync Safeguards
 
-**Touch only what you must. Clean up only your own mess.**
+Test setup behavior with temporary fixtures. Keep tests separate from installed harness configuration.
+Preserve local skills, unrelated configuration, and other live clones' installations.
+Keep setup, sync, and uninstall behavior consistent. Check repeated runs and ownership conflicts.
+Run native Windows tests for changes to symlinks, junctions, or instruction copies.
+Record unavailable platform checks as pending.
 
-When editing existing code:
+## Commits and Pull Requests
 
-- Do not improve adjacent code, comments, or formatting without need.
-- Do not refactor unrelated code.
-- Match the existing style.
-- Mention unrelated dead code instead of deleting it.
-- Remove imports, variables, and functions made unused by your changes.
-
-Every changed line should trace directly to the user's request.
-
-## 4. Goal-Driven Execution
-
-**Define success criteria and loop until they are verified.**
-
-For multi-step tasks, keep a brief plan with a verification check for each step. Examples:
-
-- Add validation: test invalid inputs, then make the tests pass.
-- Fix a bug: reproduce it with a failing test, then make the test pass.
-- Refactor behavior: verify relevant tests before and after.
-
-Strong success criteria support independent execution. Ask when a decision materially changes the intended result.
-
-## Test Verification
-
-**No tautological tests.** Test observable behavior against independently defined expectations. Do not reproduce the implementation’s logic to calculate expected results, or mock the behavior being tested and then assert the mock’s configured output. Mock only necessary external dependencies.
-
-A test counts only if it fails when the behavior breaks and passes when the behavior is correct.
-
-- For a bug fix, run the new test against the unfixed or deliberately broken behavior and confirm it fails, then confirm it passes with the fix.
-- For a feature, temporarily break or stub the feature and confirm the new test fails, then restore it and confirm the test passes.
-- Never trust a test that has only been observed passing.
+Use short, action-oriented commit subjects. Add an area prefix when useful, such as `setup:` or `statusline:`.
+Keep independent changes in separate commits.
+Describe behavior changes and test results in pull requests. State platform limits.

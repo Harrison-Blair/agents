@@ -1,7 +1,7 @@
 # agents
 
 The one synced source for what coding agents read from the home directory:
-portable skills, the shared `AGENTS.md` instructions, the session-start hooks
+portable skills, the shared `global/AGENTS.md` instructions, the session-start hooks
 that keep both updated, and a shared [statusline](statusline/README.md). Setup
 installs them for Claude Code, Codex, Cursor, and Pi on Linux, macOS, and
 Windows (Git Bash). One clone per machine is the source of truth. Machine-local
@@ -10,7 +10,8 @@ skills can live alongside its links.
 ## Layout
 
 ```
-AGENTS.md                shared instructions, linked into ~/.agents and each harness
+AGENTS.md                contributor instructions for this repository only
+global/AGENTS.md         shared instructions, linked into ~/.agents and each harness
 skills/<name>/SKILL.md   one skill per directory (see skills/agnostic-skill for conventions)
 hooks/claude.json        SessionStart entry merged into ~/.claude/settings.json
 hooks/codex.json         SessionStart entry merged into ~/.codex/hooks.json
@@ -46,7 +47,7 @@ needed.
 That run installs one session-start hook per harness (Pi gets an extension
 instead), and the hook runs `scripts/setup.sh --sync` from this clone at each
 session start. Sync does everything setup does, so later changes -- new skills,
-an edited `AGENTS.md` or hook template -- arrive on their own; setup is only
+an edited `global/AGENTS.md` or hook template -- arrive on their own; setup is only
 needed again after moving or re-cloning the repo. To sync by hand:
 
 ```sh
@@ -72,7 +73,7 @@ absent:
 - Links each Pi extension in `pi/` into `~/.pi/agent/extensions/<name>`, and
   prunes a link there that points into this clone's `pi/` at something gone,
   such as an extension that was renamed.
-- Links `AGENTS.md` into `~/.agents` and each harness; see
+- Links `global/AGENTS.md` into `~/.agents` and each harness; see
   [AGENTS.md](#agentsmd).
 - Writes a small wrapper into `~/.local/bin` for every command a skill ships in
   `skills/<name>/bin/`, so agents in any harness run it by its bare name.
@@ -112,13 +113,15 @@ them. Open Codex and run `/hooks` to review the entry.
 
 ## AGENTS.md
 
-`AGENTS.md` at the root of the clone holds the instructions every harness reads.
+`global/AGENTS.md` holds the global instructions distributed to each harness.
+The root `AGENTS.md` is the contributor guide for this repository and is never
+installed as global instructions.
 Setup and sync link it in two steps, so one shared entry decides what all
 harnesses see:
 
 | Path | Links to | When |
 | --- | --- | --- |
-| `~/.agents/AGENTS.md` | `<clone>/AGENTS.md` | always |
+| `~/.agents/AGENTS.md` | `<clone>/global/AGENTS.md` | always |
 | `~/.claude/CLAUDE.md` | `~/.agents/AGENTS.md` | `~/.claude` exists |
 | `~/.codex/AGENTS.md` | `~/.agents/AGENTS.md` | `~/.codex` exists |
 | `~/.pi/agent/AGENTS.md` | `~/.agents/AGENTS.md` | `~/.pi/agent` exists |
@@ -140,14 +143,22 @@ it cannot make one, so it writes a copy instead and warns. The copy's first line
 is the managed marker, naming the clone it came from:
 
 ```
-<!-- Managed by the agents repository: <clone>/AGENTS.md. Edit it there; this copy is rewritten at sync. -->
+<!-- Managed by the agents repository: <clone>/global/AGENTS.md. Edit it there; this copy is rewritten at sync. -->
 ```
 
 Sync rewrites a copy naming this clone when the content changes (warning only
 when it writes), and replaces it with a link once a link can be made. A copy
 naming a clone that no longer exists is treated the same way; one naming
-another clone that still exists is left with a warning. Edit `AGENTS.md` in the
-clone, never an installed copy.
+another clone that still exists is left with a warning. Edit `global/AGENTS.md`
+in the clone, never an installed copy.
+
+Existing installations migrate automatically during setup or sync: links to
+this clone's former root `AGENTS.md` change to the new source, and managed
+copies with the old marker are recognized and refreshed. Unrelated files and
+other live clones' installations remain untouched. Uninstall recognizes both
+old and new installations. After an update, run `scripts/setup.sh --sync`
+before starting agents, then restart existing sessions. Until migration runs,
+a legacy link still reads the root file, which now contains project guidance.
 
 ## Statusline
 
