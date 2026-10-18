@@ -11,12 +11,16 @@
     [
       "project",
       "git_branch",
+      "provider",
       "five_hour_remaining",
       "weekly_remaining"
     ],
     [
       "session_name",
       "prompt_cache"
+    ],
+    [
+      "extension_statuses"
     ]
   ],
   "codex": {

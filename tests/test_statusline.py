@@ -159,23 +159,43 @@ class RendererTests(unittest.TestCase):
             "five-hour-limit", "weekly-limit",
         ])
 
-    def test_codex_override_does_not_change_other_renderers(self) -> None:
+    def test_harness_overrides_do_not_change_other_renderers(self) -> None:
         payload = {"model": {"display_name": "Example"}, "session_name": "task"}
-        for render in (statusline.render_claude, statusline.render_cursor):
-            baseline = copy.deepcopy(self.config)
-            baseline.pop("codex", None)
-            overridden = copy.deepcopy(baseline)
-            overridden["codex"] = {"lines": [["project"]]}
-            self.assertEqual(render(payload, overridden), render(payload, baseline))
+        for harness in ("codex", "pi"):
+            for render in (statusline.render_claude, statusline.render_cursor):
+                baseline = copy.deepcopy(self.config)
+                baseline.pop(harness, None)
+                overridden = copy.deepcopy(baseline)
+                overridden[harness] = {"lines": [["project"]]}
+                self.assertEqual(render(payload, overridden), render(payload, baseline))
 
-    def test_invalid_codex_overrides_are_rejected(self) -> None:
-        for override in (None, [], {}, {"lines": None}, {"lines": []},
-                         {"lines": [[]]}, {"lines": ["model"]},
-                         {"lines": [[3]]}, {"lines": [["unknown"]]},
-                         {"lines": [["model"], ["model"]]}):
-            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+    def test_pi_override_does_not_change_codex_mapping(self) -> None:
+        overridden = copy.deepcopy(self.config)
+        overridden["pi"] = {"lines": [["project"]]}
+        self.assertEqual(
+            statusline.codex_status_line(overridden),
+            statusline.codex_status_line(self.config),
+        )
+
+    def test_pi_only_segments_map_to_nothing_in_codex(self) -> None:
+        self.config["codex"] = {"lines": [["provider", "model", "extension_statuses"]]}
+        self.assertEqual(
+            statusline.codex_status_line(self.config), ["model-with-reasoning"]
+        )
+
+    def test_invalid_harness_overrides_are_rejected(self) -> None:
+        for harness, override in [
+            (harness, override)
+            for harness in ("codex", "pi")
+            for override in (None, [], {}, {"lines": None}, {"lines": []},
+                             {"lines": [[]]}, {"lines": ["model"]},
+                             {"lines": [[3]]}, {"lines": [["unknown"]]},
+                             {"lines": [["model"], ["model"]]})
+        ]:
+            with self.subTest(harness=harness, override=override), \
+                    tempfile.TemporaryDirectory() as directory:
                 config = copy.deepcopy(self.config)
-                config["codex"] = override
+                config[harness] = override
                 path = Path(directory) / "config.json"
                 path.write_text(json.dumps(config), encoding="utf-8")
                 with self.assertRaises(statusline.ConfigError):
@@ -244,6 +264,72 @@ class RendererTests(unittest.TestCase):
             statusline.render_claude(payload, self.config, now=self.NOW),
             "Opus\ncache: cold",
         )
+
+
+class SharedCaseTests(unittest.TestCase):
+    """Cases in tests/statusline_cases.json; test_pi_statusline.ts checks the same ones."""
+
+    CASES = json.loads(
+        (Path(__file__).with_name("statusline_cases.json")).read_text(encoding="utf-8")
+    )
+
+    def setUp(self) -> None:
+        self.raw_config = json.loads((HERE / "config.json").read_text(encoding="utf-8"))
+
+    def now(self, offset_minutes: int | None = None) -> datetime:
+        if offset_minutes is None:
+            offset_minutes = self.CASES["offset_minutes"]
+        tz = timezone(timedelta(minutes=offset_minutes))
+        return datetime.fromtimestamp(self.CASES["now"], tz=tz)
+
+    def test_token_counts(self) -> None:
+        for value, expected in self.CASES["token_count"]:
+            with self.subTest(value=value):
+                self.assertEqual(statusline._format_token_count(value), expected)
+
+    def test_clock(self) -> None:
+        for case in self.CASES["clock"]:
+            with self.subTest(case=case):
+                now = self.now(case.get("offset_minutes"))
+                self.assertEqual(statusline._clock(case["epoch"], now), case["expected"])
+
+    def test_quota_segments(self) -> None:
+        for case in self.CASES["quota"]:
+            with self.subTest(case=case):
+                config = copy.deepcopy(self.raw_config)
+                config["colors"]["enabled"] = case["colors"]
+                remaining = statusline._remaining_percentage(
+                    {"used_percentage": case["used"]}
+                )
+                reset = statusline._clock(case["reset"], self.now())
+                self.assertEqual(
+                    statusline._percentage_segment(
+                        case["segment"], remaining, reset, config
+                    ),
+                    case["expected"],
+                )
+
+    def test_join_lines(self) -> None:
+        for case in self.CASES["join"]:
+            with self.subTest(case=case):
+                self.assertEqual(
+                    statusline.join_lines(
+                        case["values"], case["lines"], case["separator"]
+                    ),
+                    case["expected"],
+                )
+
+    def test_config_validation(self) -> None:
+        for case in self.CASES["configs"]:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                config = {**copy.deepcopy(self.raw_config), **case["set"]}
+                path = Path(directory) / "config.json"
+                path.write_text(json.dumps(config), encoding="utf-8")
+                if case["valid"]:
+                    statusline.load_config(path)
+                else:
+                    with self.assertRaises(statusline.ConfigError):
+                        statusline.load_config(path)
 
 
 MIB = 1024 * 1024

@@ -30,9 +30,20 @@ SUPPORTED_SEGMENTS = {
     "cost",
     "lines_changed",
     "prompt_cache",
+    "provider",
+    "extension_statuses",
 }
 
-UNLABELED_SEGMENTS = {"model", "project", "git_branch", "session_name", "cost", "lines_changed"}
+UNLABELED_SEGMENTS = {
+    "model",
+    "project",
+    "git_branch",
+    "session_name",
+    "cost",
+    "lines_changed",
+    "provider",
+    "extension_statuses",
+}
 
 # Segments with no native Codex equivalent map to nothing.
 CODEX_SEGMENTS = {
@@ -47,6 +58,8 @@ CODEX_SEGMENTS = {
     "cost": ("estimated-thread-cost",),
     "lines_changed": (),
     "prompt_cache": (),
+    "provider": (),
+    "extension_statuses": (),
 }
 
 ANSI = {
@@ -103,10 +116,11 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ConfigError("shared config must be an object with version 1")
 
     _validate_lines(data.get("lines"))
-    if "codex" in data:
-        if not isinstance(data["codex"], dict):
-            raise ConfigError("codex must be an object with lines")
-        _validate_lines(data["codex"].get("lines"))
+    for harness in ("codex", "pi"):
+        if harness in data:
+            if not isinstance(data[harness], dict):
+                raise ConfigError(f"{harness} must be an object with lines")
+            _validate_lines(data[harness].get("lines"))
 
     separator = data.get("separator")
     if not isinstance(separator, str):
@@ -441,13 +455,19 @@ def render_claude(
             )
 
     values.update(_session_segments(data, config, now))
+    return "\n".join(join_lines(values, config["lines"], config["separator"]))
 
+
+def join_lines(
+    values: dict[str, str], lines: list[list[str]], separator: str
+) -> list[str]:
+    """Join each row's present segments; rows with none are dropped."""
     rendered_lines = []
-    for line in config["lines"]:
+    for line in lines:
         parts = [values[segment] for segment in line if segment in values]
         if parts:
-            rendered_lines.append(config["separator"].join(parts))
-    return "\n".join(rendered_lines)
+            rendered_lines.append(separator.join(parts))
+    return rendered_lines
 
 
 def render_cursor(

@@ -1,0 +1,58 @@
+{
+  "_comment": "Shared statusline formatting cases. tests/test_statusline.py and tests/test_pi_statusline.ts both check them, so the Python and Pi renderers stay in step. Times use now = Tue 2026-08-25 14:00 at UTC-4 unless a case sets offset_minutes. Quota and config cases start from statusline/config.json.",
+  "now": 1787680800,
+  "offset_minutes": -240,
+  "token_count": [
+    [0, "0k"],
+    [499, "0k"],
+    [500, "1k"],
+    [24400, "24k"],
+    [272000, "272k"],
+    [999499, "999k"],
+    [1000000, "1M"],
+    [1240000, "1.2M"],
+    [1250000, "1.3M"],
+    [10000000, "10M"]
+  ],
+  "clock": [
+    {"epoch": 1787684700, "expected": "3:05pm"},
+    {"epoch": 1787673600, "expected": "12:00pm"},
+    {"epoch": 1787630400, "expected": "12:00am"},
+    {"epoch": 1787716740, "expected": "11:59pm"},
+    {"epoch": 1787717100, "expected": "Wed 12:05am"},
+    {"epoch": 1787837400, "expected": "Thu 9:30am"},
+    {"epoch": 1787684700, "offset_minutes": 330, "expected": "Wed 12:35am"}
+  ],
+  "quota": [
+    {"segment": "weekly_remaining", "used": 59, "reset": 1787837400, "colors": false, "expected": "w: 41% Thu 9:30am"},
+    {"segment": "five_hour_remaining", "used": 80, "reset": 1787684700, "colors": false, "expected": "5h: 20% 3:05pm"},
+    {"segment": "weekly_remaining", "used": 70.4, "reset": null, "colors": false, "expected": "w: 30%"},
+    {"segment": "weekly_remaining", "used": 120, "reset": null, "colors": false, "expected": "w: 0%"},
+    {"segment": "weekly_remaining", "used": -5, "reset": null, "colors": false, "expected": "w: 100%"},
+    {"segment": "weekly_remaining", "used": 59, "reset": 1787837400, "colors": true, "expected": "\u001b[36mw:\u001b[0m \u001b[32m41%\u001b[0m \u001b[2mThu 9:30am\u001b[0m"},
+    {"segment": "five_hour_remaining", "used": 80, "reset": null, "colors": true, "expected": "\u001b[36m5h:\u001b[0m \u001b[33m20%\u001b[0m"},
+    {"segment": "five_hour_remaining", "used": 85, "reset": null, "colors": true, "expected": "\u001b[36m5h:\u001b[0m \u001b[31m15%\u001b[0m"}
+  ],
+  "join": [
+    {"values": {"model": "M", "cost": "$1"}, "lines": [["model", "context_tokens"], ["project"], ["cost"]], "separator": " | ", "expected": ["M", "$1"]},
+    {"values": {"model": "M", "cost": "$1"}, "lines": [["cost", "model"]], "separator": " · ", "expected": ["$1 · M"]}
+  ],
+  "configs": [
+    {"set": {}, "valid": true},
+    {"set": {"pi": {"lines": [["provider"]]}}, "valid": true},
+    {"set": {"lines": [["model"], ["extension_statuses", "provider"]]}, "valid": true},
+    {"set": {"pi": null}, "valid": false},
+    {"set": {"pi": {"lines": []}}, "valid": false},
+    {"set": {"pi": {"lines": [[]]}}, "valid": false},
+    {"set": {"pi": {"lines": [["unknown"]]}}, "valid": false},
+    {"set": {"pi": {"lines": [["model"], ["model"]]}}, "valid": false},
+    {"set": {"codex": []}, "valid": false},
+    {"set": {"lines": [[3]]}, "valid": false},
+    {"set": {"version": 2}, "valid": false},
+    {"set": {"separator": 1}, "valid": false},
+    {"set": {"labels": {}}, "valid": false},
+    {"set": {"percentage_suffix": null}, "valid": false},
+    {"set": {"remaining_thresholds": {"warning_at_or_below": 10, "critical_at_or_below": 20}}, "valid": false},
+    {"set": {"colors": {"enabled": true, "model": "blue", "label": "cyan", "normal": "green", "warning": "yellow", "critical": "red", "detail": "dim"}}, "valid": false}
+  ]
+}
