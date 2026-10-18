@@ -130,6 +130,7 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(statusline.render_claude(payload, self.config), "")
 
     def test_codex_mapping_follows_shared_order(self) -> None:
+        self.config.pop("codex", None)
         self.assertEqual(
             statusline.codex_status_line(self.config),
             [
@@ -146,6 +147,39 @@ class RendererTests(unittest.TestCase):
                 "thread-name",
             ],
         )
+
+    def test_codex_override_controls_exact_field_order(self) -> None:
+        self.config["codex"] = {"lines": [[
+            "project", "git_branch", "model", "context_tokens",
+            "session_tokens", "five_hour_remaining", "weekly_remaining",
+        ]]}
+        self.assertEqual(statusline.codex_status_line(self.config), [
+            "project-name", "git-branch", "model-with-reasoning", "used-tokens",
+            "context-window-size", "total-input-tokens", "total-output-tokens",
+            "five-hour-limit", "weekly-limit",
+        ])
+
+    def test_codex_override_does_not_change_other_renderers(self) -> None:
+        payload = {"model": {"display_name": "Example"}, "session_name": "task"}
+        for render in (statusline.render_claude, statusline.render_cursor):
+            baseline = copy.deepcopy(self.config)
+            baseline.pop("codex", None)
+            overridden = copy.deepcopy(baseline)
+            overridden["codex"] = {"lines": [["project"]]}
+            self.assertEqual(render(payload, overridden), render(payload, baseline))
+
+    def test_invalid_codex_overrides_are_rejected(self) -> None:
+        for override in (None, [], {}, {"lines": None}, {"lines": []},
+                         {"lines": [[]]}, {"lines": ["model"]},
+                         {"lines": [[3]]}, {"lines": [["unknown"]]},
+                         {"lines": [["model"], ["model"]]}):
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                config = copy.deepcopy(self.config)
+                config["codex"] = override
+                path = Path(directory) / "config.json"
+                path.write_text(json.dumps(config), encoding="utf-8")
+                with self.assertRaises(statusline.ConfigError):
+                    statusline.load_config(path)
 
     def test_second_line_renders_session_details(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -440,6 +474,29 @@ class CodexSyncTests(unittest.TestCase):
         "five-hour-limit",
         "weekly-limit",
     ]
+
+    def test_cli_sync_and_check_use_committed_codex_layout(self) -> None:
+        expected = [
+            "project-name", "git-branch", "model-with-reasoning", "used-tokens",
+            "context-window-size", "total-input-tokens", "total-output-tokens",
+            "five-hour-limit", "weekly-limit",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "config.toml"
+            target.write_text('model = "gpt-test"\n[tui]\nanimations = false\n',
+                              encoding="utf-8")
+            for command in ("sync", "check", "sync"):
+                result = subprocess.run([
+                    sys.executable, "-B", str(HERE / "statusline.py"),
+                    "--config", str(HERE / "config.json"), command, "codex",
+                    "--target", str(target),
+                ], capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("already in sync", result.stdout)
+            parsed = statusline.tomllib.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(parsed["tui"]["status_line"], expected)
+            self.assertEqual(parsed["model"], "gpt-test")
+            self.assertFalse(parsed["tui"]["animations"])
 
     def test_adds_tui_table_without_changing_existing_config(self) -> None:
         original = 'model = "gpt-test"\n'

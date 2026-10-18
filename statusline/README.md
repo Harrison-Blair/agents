@@ -17,7 +17,14 @@ Its tests are `tests/test_statusline.py` at the repo root.
 `config.json` defines field order and presentation for every harness. Claude
 Code and Cursor render it directly because they send session JSON to a command. Codex
 exposes fixed native footer fields, so `statusline.py` translates the same
-segment IDs into Codex's `[tui].status_line` setting.
+segment IDs into Codex's `[tui].status_line` setting. Optional `codex.lines`
+overrides field order for Codex only; when absent, Codex uses the shared `lines`.
+Both layouts require non-empty rows of supported, non-repeated segment IDs.
+
+The committed Codex layout is project, branch, model with reasoning effort,
+context tokens used and capacity, total input tokens, total output tokens,
+five-hour quota remaining, and weekly quota remaining. Codex controls the native
+labels and separators; shared presentation settings apply to Claude and Cursor.
 
 With the committed `config.json`, Claude renders:
 
@@ -31,6 +38,7 @@ status work | cache: warm until 3:05pm
 | --- | --- |
 | `version` | Always `1`. |
 | `lines` | Segment IDs per status-line row. |
+| `codex.lines` | Optional Codex-only segment rows; falls back to `lines`. |
 | `separator` | Text between segments. |
 | `labels` | Required prefix for each labelled segment: `context_tokens`, `five_hour_remaining`, `weekly_remaining`, `session_tokens`, `prompt_cache`. |
 | `percentage_suffix` | Appended to quota percentages. |
@@ -41,7 +49,7 @@ Segments: `model`, `context_tokens`, `five_hour_remaining`, `weekly_remaining`,
 `project`, `git_branch`, `session_name`, `session_tokens`, `cost`,
 `lines_changed`, `prompt_cache`.
 
-Codex has a single footer row, so its mapping flattens `lines`; segments
+Codex has a single footer row, so its mapping flattens `codex.lines` (or `lines`); segments
 without a native Codex field (`lines_changed`, `prompt_cache`) are skipped
 there. Claude's session token totals are summed from the transcript (main
 conversation only, cache reads included) because its `context_window` totals

@@ -102,21 +102,11 @@ def load_config(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ConfigError("shared config must be an object with version 1")
 
-    lines = data.get("lines")
-    if (
-        not isinstance(lines, list)
-        or not lines
-        or any(not isinstance(line, list) or not line for line in lines)
-    ):
-        raise ConfigError("lines must be a non-empty list of non-empty lists")
-    segments = [item for line in lines for item in line]
-    if any(not isinstance(item, str) for item in segments):
-        raise ConfigError("every segment ID must be a string")
-    unknown = set(segments) - SUPPORTED_SEGMENTS
-    if unknown:
-        raise ConfigError(f"unsupported segment IDs: {', '.join(sorted(unknown))}")
-    if len(segments) != len(set(segments)):
-        raise ConfigError("segment IDs must not be repeated")
+    _validate_lines(data.get("lines"))
+    if "codex" in data:
+        if not isinstance(data["codex"], dict):
+            raise ConfigError("codex must be an object with lines")
+        _validate_lines(data["codex"].get("lines"))
 
     separator = data.get("separator")
     if not isinstance(separator, str):
@@ -152,6 +142,23 @@ def load_config(path: Path) -> dict[str, Any]:
             raise ConfigError(f"colors.{key} must be one of: {', '.join(ANSI)}")
 
     return data
+
+
+def _validate_lines(lines: Any) -> None:
+    if (
+        not isinstance(lines, list)
+        or not lines
+        or any(not isinstance(line, list) or not line for line in lines)
+    ):
+        raise ConfigError("lines must be a non-empty list of non-empty lists")
+    segments = [item for line in lines for item in line]
+    if any(not isinstance(item, str) for item in segments):
+        raise ConfigError("every segment ID must be a string")
+    unknown = set(segments) - SUPPORTED_SEGMENTS
+    if unknown:
+        raise ConfigError(f"unsupported segment IDs: {', '.join(sorted(unknown))}")
+    if len(segments) != len(set(segments)):
+        raise ConfigError("segment IDs must not be repeated")
 
 
 def _number(value: Any) -> float | None:
@@ -471,7 +478,7 @@ def parse_json_stream(stream: Any) -> Any:
 def codex_status_line(config: dict[str, Any]) -> list[str]:
     return [
         field
-        for line in config["lines"]
+        for line in config.get("codex", config)["lines"]
         for segment in line
         for field in CODEX_SEGMENTS[segment]
     ]
