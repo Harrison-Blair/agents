@@ -16,7 +16,7 @@ skills/<name>/SKILL.md   one skill per directory (see skills/agnostic-skill for 
 hooks/claude.json        SessionStart entry merged into ~/.claude/settings.json
 hooks/codex.json         SessionStart entry merged into ~/.codex/hooks.json
 hooks/cursor.json        sessionStart entry merged into ~/.cursor/hooks.json
-pi/<name>/               Pi extensions (agents-autopull), linked into ~/.pi/agent/extensions
+pi/<name>/               Pi extensions (agents-autopull, ask-user-question, statusline), linked into ~/.pi/agent/extensions
 statusline/              statusline renderer and its shared config.json
 scripts/setup.sh         one-time setup, and the --sync command the hooks run
 ```
@@ -162,7 +162,7 @@ a legacy link still reads the root file, which now contains project guidance.
 
 ## Statusline
 
-Setup and sync also point Claude Code, Cursor, and Codex at `statusline/`, run straight from
+Setup and sync also point Claude Code, Cursor, Codex, and Pi at `statusline/`, run straight from
 the clone, so a pushed change to its `config.json` or `statusline.py` arrives
 on its own. This part needs Python 3.11 or newer (`python3`); without it the
 statusline is skipped with a warning and everything else still runs.
@@ -177,6 +177,8 @@ statusline is skipped with a warning and everything else still runs.
   directory. Restart Cursor to pick up a changed `cli-config.json`.
 - Runs `statusline.py sync codex`, which writes `[tui].status_line` in
   `~/.codex/config.toml` and leaves the rest of that file alone.
+- Links the `pi/statusline` extension, which replaces Pi's footer and reads
+  `config.json` from the clone it links to. It needs no Python.
 - Drops the `SessionStart` entries installed by the retired `statuslines` repo
   (`setup.sh" --sync --hook=statuslines`) from both hook files, so a machine
   that used it moves over at its next session start.

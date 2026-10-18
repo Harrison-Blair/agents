@@ -28,7 +28,7 @@ Run these checks before committing relevant changes:
 
 ```sh
 python3 -B -m unittest discover -s tests -v
-node --test tests/test_ask_user_question.ts
+node --test tests/test_ask_user_question.ts tests/test_pi_statusline.ts
 python3 -B scripts/validate_repo.py
 bash -n scripts/setup.sh
 sh -n scripts/setup.sh

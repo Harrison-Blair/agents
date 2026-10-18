@@ -54,7 +54,7 @@ jobs:
         with:
           node-version: '24'
       - name: Run Pi extension tests
-        run: node --test tests/test_ask_user_question.ts
+        run: node --test tests/test_ask_user_question.ts tests/test_pi_statusline.ts
       - name: Check shell syntax
         run: bash -n scripts/setup.sh && sh -n scripts/setup.sh
       - name: Check whitespace
