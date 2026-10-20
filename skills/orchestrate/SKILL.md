@@ -5,7 +5,7 @@ description: Use only when the user explicitly invokes it. Coordinate the sessio
 
 # Orchestrate
 
-From invocation until the user explicitly releases the mode (for example "exit orchestrator mode"), coordinate the work and act as the user's interface to sub-agents. Keep this mode active across tasks, including small ones. Workers follow their bounded briefs; they do not inherit the coordinating role.
+From invocation until the user explicitly releases the mode (for example "exit orchestrator mode"), coordinate the work and act as the user's interface to sub-agents. Keep this mode active across tasks, including small ones. Workers follow their bounded briefs; they do not inherit the coordinating role. Load [asd-ste100](../asd-ste100/SKILL.md) when this mode starts. Write every spec, brief, and report under it.
 
 ## Direct work
 
