@@ -1,3 +1,6 @@
 # Runtime state from scripts/setup.sh
 .sync.lock/
 .sync-stamp
+
+# Python bytecode caches
+__pycache__/
