@@ -293,6 +293,22 @@ class SharedCaseTests(unittest.TestCase):
                 now = self.now(case.get("offset_minutes"))
                 self.assertEqual(statusline._clock(case["epoch"], now), case["expected"])
 
+    def test_clock_without_glibc_strftime_flags(self) -> None:
+        # Windows strftime rejects the glibc "%-" no-padding flag.
+        class WindowsDatetime(datetime):
+            def strftime(self, fmt: str) -> str:
+                if "%-" in fmt:
+                    raise ValueError("Invalid format string")
+                return super().strftime(fmt)
+
+        with unittest.mock.patch.object(statusline, "datetime", WindowsDatetime):
+            for case in self.CASES["clock"]:
+                with self.subTest(case=case):
+                    now = self.now(case.get("offset_minutes"))
+                    self.assertEqual(
+                        statusline._clock(case["epoch"], now), case["expected"]
+                    )
+
     def test_quota_segments(self) -> None:
         for case in self.CASES["quota"]:
             with self.subTest(case=case):

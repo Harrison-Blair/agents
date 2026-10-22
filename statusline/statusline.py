@@ -346,7 +346,7 @@ def _clock(epoch: Any, now: datetime) -> str | None:
         when = datetime.fromtimestamp(number, tz=now.tzinfo)
     except (OverflowError, OSError, ValueError):
         return None
-    clock = when.strftime("%-I:%M%p").lower()
+    clock = f"{when.hour % 12 or 12}:{when:%M%p}".lower()
     if when.date() == now.date():
         return clock
     return f"{when:%a} {clock}"
