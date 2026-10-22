@@ -51,6 +51,9 @@ Use the `asd-ste100` skill when changing this guide.
 Test setup behavior with temporary fixtures. Keep tests separate from installed harness configuration.
 Preserve local skills, unrelated configuration, and other live clones' installations.
 Keep setup, sync, and uninstall behavior consistent. Check repeated runs and ownership conflicts.
+Make all files work on Linux, macOS, and Windows.
+Do not use a feature that only some operating systems support.
+For example, Python `strftime` on Windows does not support `%-I`.
 Run native Windows tests for changes to symlinks, junctions, or instruction copies.
 Record unavailable platform checks as pending.
 
