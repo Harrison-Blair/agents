@@ -1,162 +1,156 @@
 ---
 name: interrogate
-description: Help the user collaboratively flesh out or thoroughly examine a plan, idea, or decision. Use when the user requests this kind of planning conversation or explicitly invokes interrogate; ordinary clarification alone does not trigger it.
+description: Help the user collaboratively flesh out or thoroughly examine a plan, idea, or decision. Use when the user requests this kind of planning conversation or explicitly invokes interrogate. Ordinary clarification alone does not trigger it.
 ---
 
-Help the user develop their plan through questions until you reach a shared understanding. Load [asd-ste100](../asd-ste100/SKILL.md) before the first round. Write each round and the final summary under it.
+# Interrogate
 
-Bring every substantive **design decision** to the user, including goals, scope, behavior, architecture, constraints, and tradeoffs. Handle incidental wording, formatting, and mechanical details autonomously. Respect established answers and preferences; revisit them only when new evidence or a user correction warrants it.
+Lead the design conversation as an architect. Give the user enough context to make informed decisions about the plan and its implementation.
 
-Ask **up to 3 related questions per round**, then wait for the user's answers. Ask only questions whose prerequisites are settled. Keep remaining questions for later rounds and adjust them as answers arrive. Do not silently choose answers to unresolved design decisions; let the user settle or explicitly defer them.
+Load [asd-ste100](../asd-ste100/SKILL.md) before the first round. Apply it to the questions, explanations, and final plan.
 
-Investigate discoverable **facts** using available tools before asking questions that depend on them. Cite relevant evidence and distinguish verified facts from assumptions. If evidence is unavailable, explain the uncertainty rather than presenting a guess as fact.
+## Establish the design
 
-## Experiments
+Read the relevant project files and prior conversation before asking questions. Investigate facts with available tools. Cite inspected sources for project behavior.
 
-When an **experiment** could clarify a detail or test an idea, and it is fast and either read-only or confined to a scratch directory, run it before asking and report the result. Offer anything that edits the project, costs money, or spawns subagents as an option on the question it would inform, `Test it first: {what, rough cost}`, and run it only if the user picks that option. Keep every experiment within existing authorization.
+Start an unclear idea with a concrete situation or example. Establish the goal, success criteria, and constraints before asking dependent implementation questions.
 
-Report results under the question they inform:
+Propose coherent designs and explain how they work. Identify gaps, conflicts, and implicit decisions. Bring meaningful design choices to the user with advice.
 
-```
-**Tested:** {what was run}
-**Found:** {result}
-{How this changes the recommendation}
-```
+Cover these areas when they affect the intended result:
 
-## Each round
+- Goals, scope, and user behavior.
+- Architecture, interfaces, data, dependencies, and constraints.
+- Failure handling, delivery, and verification.
 
-Present a round in two steps: context as text, then the questions.
+Handle wording, formatting, and routine mechanical details autonomously. Keep accepted decisions, agent proposals, delegated details, and unresolved choices distinct.
 
-**1. Context as text.** Open with a recap. Then give each question its own section.
+## Explain each decision before asking
 
-- **Recap:** a bulleted **Settled last round** list of the answers from the previous round. Then write a one-line **This round** that names what the round covers. Omit **Settled last round** in the first round.
-- **Per question**, in this order:
-  1. A `## {N}. {Question}` heading.
-  2. A fact line: one or two sentences that state the fact the decision depends on, with its source. Put the trigger in this line when one applies.
-  3. An options table. See Options table.
-  4. A **Tradeoff** line, only when the table does not show the main tension.
-  5. A picture, only when it shows something the table cannot. See Pictures.
+Present a **decision brief in chat** before each question. Assume the user does not remember the project context.
 
-Use bold for the key fact. Do not add other labeled sections.
+Use these parts in this order:
 
-**Options table.** Write the options as a markdown table with the columns `Choice | Answer | Pros | Cons`.
+1. **How it works today.** Explain the relevant behavior and mechanism. Show a concrete situation and its user-visible result. Cite the evidence. For new work, explain the starting point and known constraints.
+2. **What we need to decide.** Explain the open choice, why it matters, and what it affects.
+3. **Alternatives.** Explain how each viable approach works, including its benefits, costs, and practical consequences. Use a table when it helps comparison.
+4. **My recommendation.** Describe the proposed design and why it fits. Explain relevant established practice and its applicability. State assumptions or uncertainty that could change the recommendation.
+5. **Question.** Ask for the specific decision through the available question tool. Use numbered questions in chat when no tool exists.
 
-- **Choice** -- the letter. Put the recommendation in row A and mark it `A (REC)`.
-- **Answer** -- the label, then what happens if the user picks it. Example: `Global: the second sync waits`.
-- **Pros** and **Cons** -- short phrases of about 6 words.
+Give a full comparison before asking the user to choose. Match the detail to the decision. Explain unfamiliar mechanisms before comparing alternatives.
 
-Write each viable answer as a row, including `Test it first: {what, rough cost}`. The table can be wider than 72 columns. Keep each cell short.
+Write in plain language and define unfamiliar terms. Keep sentences short without removing context the user needs. Do not impose a sentence limit on the whole explanation.
 
-**2. Then ask.** If the harness provides a structured question tool, ask through it after the text. Give each option a short label from the table and a one-line description. Put row A first. Offer at most 4 total options, or fewer if the tool's limit is lower. Always reserve the last option for `Simplify -- restate the question plainly, recap the context it needs, and show it a new way`, including on the final confirmation question. If the table has more rows than the tool can show, tell the user to reply with the letter in free text. If no question tool is available, invite a reply such as `1A, 2B`.
+A table or tool menu alone is insufficient context. Before asking, check whether the brief lets the user explain the choices and their consequences.
 
-When the user selects **Simplify**, write a reply that is shorter than the original round. Add only content that the round did not show. Do not repeat the round with more words. Use these parts in this order:
+Distinguish verified facts, hypothetical examples, proposals, and assumptions. State unknown causes or frequency explicitly. Explain recommendations that depend on current external guidance with relevant sources.
 
-1. **Plain question** -- the question in one sentence, with no jargon.
-2. **What you need to remember** -- the earlier facts and answers that the question depends on.
-3. **New picture** -- a picture of a different kind from the round's picture, or an everyday example.
-4. **Choices** -- one line for each row that states what the user gets.
+## Explain visually
 
-If the user names a specific confusion, answer it first. Then ask the same unresolved question again with the same options. Keep the answers to the other questions in the round. A request to simplify does not settle or defer a decision. For final confirmation, apply the same parts to the summary. Then ask for confirmation again.
+Use diagrams as a primary explanation for behavior, structure, timing, and layout. Add short captions and supporting reasoning.
 
-## Writing questions
+Use multiple diagrams for one question when each explains another part of the decision. There is no fixed diagram count.
 
-**Keep it simple and short.** Write in plain language a newcomer to the topic could follow. Define a term the first time it appears if the user may not know it. Keep sentences short. Do not assume the user remembers earlier context; restate the one fact the question hinges on.
+For example, one question can use:
 
-**Draw only when it adds.** Add a picture only for a flow, timing, structure, or a layout. Never draw a picture that repeats the options table. Choose the kind and draw it by the rules under Pictures.
+- A flow of the current behavior.
+- A comparison of the alternative designs.
+- A timeline of their user-visible consequences.
 
-**Give enough context to judge.** Use the fact line to show why the decision matters to the user's goal. Use the Answer column to show what each choice leads to in practice. Do not repeat the question or the recommendation.
+Place each diagram beside the explanation it supports, before the question tool. Label current behavior and proposed behavior clearly. Keep names consistent across diagrams.
 
-**Consider when it happens.** Before presenting each question, assess whether the behavior, issue, fix, or tradeoff has a relevant encounter scenario. If so, put a concrete trigger and the result the user sees in the fact line. State unknown triggers, causes, or frequency explicitly rather than inventing them. Omit the trigger when it does not apply. This applies to design choices as well as issues and fixes.
+Use flows for behavior, trees for ownership, timelines for timing, and layouts for screen arrangements. Compare alternatives side by side when readable.
 
-**Offer every viable answer.** Write each workable answer as a table row. Always recommend one row. Use the Pros and Cons to show when each row is the better choice. The user may answer with their own option.
+Use Mermaid when the harness supports rendered diagrams. Otherwise, use aligned plain-text diagrams in fenced code blocks. Check labels, connections, and readability before sending.
 
-## Pictures
+Split a crowded diagram into smaller diagrams. Avoid decoration and repeated pictures that add no understanding. Do not force a diagram onto an abstract choice it cannot explain.
 
-Pick the kind from what the question is about:
+## Ask in small rounds
 
-| the question is about           | draw a     |
-|---------------------------------|------------|
-| order of steps or data moving   | boxed flow |
-| what contains or owns what      | tree       |
-| when things happen              | timeline   |
-| where things sit on a screen    | layout     |
+Ask up to three related, independent questions per round. Give every question its own decision brief. Present all briefs before opening the question tool.
 
-Add a second picture of another kind only when both help.
+Ask only questions with known facts and settled prerequisite decisions. Keep dependent questions for later rounds. Adjust the remaining questions after each answer.
 
-**Limits.** At most 72 columns, 6 boxes, and 15 lines. Label every box. Before sending, check that the longest row fits in 72 columns. Check that each vertical bar and box corner is in the same column as the one above it. Redraw anything that fails. Shorten labels rather than widen a picture.
+Keep tool options short and consistent with the brief. Put the recommendation first. Respect the tool's option limit. Accept the user's own answer or an explicit deferral.
 
-**Emitting.** Write the options table as plain markdown, not inside a code block. Put every picture inside a fenced code block. Draw lines with `─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴` and arrowheads with `▶` and `▼`.
+Do not repeat the full explanation inside the tool. Do not reserve an option for simplification. In plain chat, invite numbered answers such as `1A, 2B`.
 
-**Templates.** Copy the shape and replace the labels.
+Preserve answers to the other questions when a response is partial. Clarify ambiguous or contradictory answers before asking dependent questions. Do not treat silence or a request for explanation as acceptance.
 
-Boxed flow:
-```
-┌─────────┐   ┌─────────┐  yes   ┌─────────┐
-│ step 1  │──▶│ check?  │───────▶│ outcome │
-└─────────┘   └────┬────┘        └─────────┘
-               no  │   ┌─────────┐
-                   └──▶│ step 2  │──▶ outcome
-                       └─────────┘
-```
+When the user needs help, address the specific confusion first. Explain the mechanism another way or use another diagram or concrete example. Then ask the unresolved question again.
 
-Tree:
-```
-parent
-├─ child A
-│  └─ grandchild
-└─ child B
-```
+Do not silently choose meaningful implementation details. Let the user decide, explicitly delegate, or defer them. Revisit accepted decisions only after new evidence or a user correction.
 
-Timeline:
-```
-t0  request arrives
-t1  cache checked
-t2  fetch, on a miss only
-t3  response sent
-```
+## Resolve unknowns
 
-Layout:
-```
-┌─────────────────────────────────┐
-│ header                          │
-├──────────┬──────────────────────┤
-│ sidebar  │ main                 │
-└──────────┴──────────────────────┘
+Distinguish unknowns that need research, conversation, or a concrete artifact. Investigate discoverable facts before asking questions that depend on them.
+
+When a quick experiment can answer a factual question, use existing authorization to run it. Keep scratch work isolated. Explain what you tested, what you found, and how the result affects the recommendation.
+
+When words cannot resolve a choice, propose a rough artifact the user can inspect. Examples include a flow, layout, outline, or prototype.
+
+Keep research, experiments, delegation, and artifacts within the active task's authorization. Ask for additional authorization only when needed. Remove temporary resources after recording and checking their results.
+
+## Develop the plan together
+
+Briefly connect each new round to the relevant accepted decisions. Restore the context needed for the next choices.
+
+Show each settled area as a short section of the developing plan. Let the user correct it before building dependent decisions on it.
+
+Finish when meaningful decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, and remaining unknowns.
+
+Check shared understanding through the question tool when available. Revise affected sections after corrections. Identify deferred decisions that still block implementation.
+
+Invoking this skill alone authorizes a design conversation. Use existing authorization for implementation or saved artifacts. Do not create files, tickets, commits, or published content without that authorization.
+
+## Example decision brief
+
+This example describes a hypothetical sync service.
+
+**How it works today**
+
+Starting a session starts background sync. A second session skips its sync when another sync is running.
+
+```mermaid
+flowchart LR
+    A[First session] --> B[Sync runs]
+    C[Second session] --> D[Finds active sync]
+    B -.-> D
+    D --> E[Skips duplicate sync]
+    E --> F[Session opens]
 ```
 
-## Example round
+**What we need to decide**
 
-Context as text:
+Should opening the second session depend on that sync finishing? This affects startup speed and which configuration the session can load.
 
-````
-**Settled last round**
-- Sync runs from the setup script
-- One clone per machine is the common case
+**Alternatives**
 
-**This round:** where the sync lock lives
-
-## 1. Where should the lock file live?
-
-setup.sh writes `.sync.lock` inside each clone (scripts/setup.sh:142). So when you start a sync in a second clone while the first runs, **both syncs write at the same time** (README.md:81).
-
-| Choice  | Answer                                | Pros          | Cons                     |
-|---------|---------------------------------------|---------------|--------------------------|
-| A (REC) | Per clone: both syncs run at once     | Matches today | Shared files can collide |
-| B       | Global: the second sync waits         | No collisions | Clones take turns        |
-| C       | No lock: retry on a collision         | Fastest       | Needs retry logic        |
-| D       | Test it first: two real syncs, ~5 min | Real evidence | Writes files in a clone  |
-````
-
-Then the question tool:
-
-```
-Where should the lock file live?
-- A: per clone (REC) -- matches today, and clones stay independent
-- B: global -- better if clones write shared files
-- C: no lock -- better if syncs are rare and short
-- Simplify -- restate the question plainly, recap the context it needs, and show it a new way
+```mermaid
+flowchart LR
+    subgraph A[Open immediately]
+        direction TB
+        A1[Second session arrives] --> A2[Session opens]
+        A2 --> A3[May load older configuration]
+    end
+    subgraph B[Wait for sync]
+        direction TB
+        B1[Second session arrives] --> B2[Wait for sync to finish]
+        B2 --> B3[Session opens after updates]
+    end
 ```
 
-## Wrapping up
+Opening immediately keeps startup responsive. The session may load older configuration.
 
-Once all substantive design decisions are settled or explicitly deferred, summarize the agreed decisions, assumptions, and remaining unknowns as a bulleted list. Ask the user to confirm shared understanding, through the question tool when available. If they correct the summary, revisit the affected questions and update it until they agree. Invoking this skill alone does not authorize implementation.
+Waiting lets updates finish before configuration loads. A slow download delays startup.
+
+**My recommendation**
+
+Open immediately because this service treats sync as background maintenance. I would recommend waiting if configuration freshness were a requirement.
+
+**Question tool**
+
+Should the second session open immediately or wait for sync?
+
+- **Open immediately (recommended):** Keep startup responsive, with potentially older configuration.
+- **Wait for sync:** Let updates finish before opening, with a possible startup delay.
