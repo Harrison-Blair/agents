@@ -12,12 +12,14 @@ Never distribute the root file as global instructions.
 - `skills/<name>/SKILL.md` defines each portable skill.
 - `hooks/` contains session-start templates for Claude Code, Codex, and Cursor.
 - `pi/` contains Pi extensions.
+- `mods/<name>/` contains each Claude Code mod and its tests.
 - `statusline/` contains the Python renderer and shared configuration.
 - `tests/` contains Python regression tests and Node tests for Pi extensions.
 
 ## Development Commands
 
 Use Python 3.11 or later for the statusline. Use Node.js 22.18 or later for the Pi extension tests.
+Use Claude Code 2.1.311 for the mod checks. CI uses the same version.
 Install the pinned check dependencies:
 
 ```sh
@@ -33,6 +35,9 @@ python3 -B scripts/validate_repo.py
 bash -n scripts/setup.sh
 sh -n scripts/setup.sh
 shellcheck scripts/setup.sh
+claude plugin validate mods/mermaid-render
+claude plugin test mods/mermaid-render
+shellcheck mods/mermaid-render/tests/smoke.sh
 git diff --check
 ```
 
