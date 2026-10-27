@@ -5,9 +5,11 @@ changing HOME or touching the user's actual configuration. Windows command
 boundaries are simulated; native junction behavior needs a Git Bash smoke test.
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -1469,6 +1471,149 @@ link_agents_md
         self.assertTrue(toml.is_symlink())
         self.assertFalse(toml.exists())
         self.assertEqual(toml.readlink(), self.base / "gone.toml")
+
+
+# Offline stand-ins for the renderer downloads. curl serves files from a fixture
+# directory and logs each URL; npm "installs" mermaid-cli by writing its script.
+STUB_CURL = r"""#!/bin/sh
+out="$3"; url="$4"
+printf '%s\n' "$url" >> "$AGENTS_TEST_HOME/curl-log"
+cp "$AGENTS_CURL_FIXTURE/${url##*/}" "$out"
+"""
+
+STUB_NPM = r"""#!/bin/sh
+printf '%s|%s\n' "$*" "$PUPPETEER_CACHE_DIR" >> "$AGENTS_TEST_HOME/npm-log"
+mkdir -p "$3/node_modules/@mermaid-js/mermaid-cli/src"
+: > "$3/node_modules/@mermaid-js/mermaid-cli/src/cli.js"
+"""
+
+
+class ModTests(unittest.TestCase):
+    """Mods under mods/ and the renderers the mermaid-render mod needs."""
+
+    # The SetupTests fixture, without running its tests a second time.
+    run_setup = SetupTests.run_setup
+    add_skill = SetupTests.add_skill
+
+    def setUp(self):
+        SetupTests.setUp(self)
+        self.mod = self.repo / "mods/mermaid-render"
+        (self.mod / ".claude-plugin").mkdir(parents=True)
+        (self.mod / ".claude-plugin/plugin.json").write_text('{"name": "mermaid-render"}\n')
+        self.cache = self.home / ".cache/mermaid-render"
+        fixture = self.base / "curl-fixture"
+        fixture.mkdir()
+        binary = self.base / "mermaid-ascii"
+        binary.write_text("#!/bin/sh\necho art\n")
+        lines = []
+        for os_name in ("Linux", "Darwin"):
+            for arch in ("x86_64", "arm64"):
+                asset = "mermaid-ascii_%s_%s.tar.gz" % (os_name, arch)
+                subprocess.run(["tar", "-czf", str(fixture / asset), "-C", str(self.base),
+                                "mermaid-ascii"], check=True)
+                digest = hashlib.sha256((fixture / asset).read_bytes()).hexdigest()
+                lines.append("%s  %s\n" % (digest, asset))
+        self.checksums = fixture / "mermaid-ascii_1.6.1_checksums.txt"
+        self.checksums.write_text("".join(lines))
+        self.env["AGENTS_CURL_FIXTURE"] = str(fixture)
+        bin_dir = self.base / "bin"
+        for name, body in (("curl", STUB_CURL), ("npm", STUB_NPM)):
+            (bin_dir / name).write_text(body)
+            (bin_dir / name).chmod(0o755)
+
+    def hide_npm(self):
+        """A PATH holding every command the real one does, but no npm or node."""
+        hidden = self.base / "no-npm-bin"
+        hidden.mkdir()
+        for directory in self.env["PATH"].split(os.pathsep):
+            if not os.path.isdir(directory):
+                continue
+            for entry in os.listdir(directory):
+                target = hidden / entry
+                if entry in ("npm", "node") or target.exists() or target.is_symlink():
+                    continue
+                path = os.path.join(directory, entry)
+                if os.path.isfile(path) and os.access(path, os.X_OK):
+                    target.symlink_to(path)
+        self.env["PATH"] = str(hidden)
+
+    def log(self, name):
+        path = self.home / name
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_setup_links_mods_and_installs_both_renderers_once(self):
+        result = self.run_setup()
+        self.assertEqual((self.claude / "mermaid-render").resolve(), self.mod.resolve())
+        self.assertEqual((self.cache / "bin/mermaid-ascii").read_text(), "#!/bin/sh\necho art\n")
+        self.assertTrue((self.cache / "node_modules/@mermaid-js/mermaid-cli/src/cli.js").is_file())
+        npm = self.log("npm-log")
+        self.assertEqual(npm, ["install --prefix %s --no-fund --no-audit --loglevel=error "
+                               "@mermaid-js/mermaid-cli@12.0.0|%s/puppeteer" % (self.cache, self.cache)])
+        self.assertIn("installed: mermaid-ascii 1.6.1", result.stdout)
+        self.assertIn("installed: mermaid-cli 12.0.0", result.stdout)
+        self.assertFalse((self.cache / "download").exists())
+        # A repeat finds both versions in place and downloads nothing.
+        downloads = len(self.log("curl-log"))
+        self.assertEqual(downloads, 2)
+        self.run_setup()
+        self.assertEqual(len(self.log("curl-log")), downloads)
+        self.assertEqual(len(self.log("npm-log")), 1)
+
+    def test_sync_links_mods_but_installs_nothing(self):
+        self.run_setup("--sync")
+        self.assertEqual((self.claude / "mermaid-render").resolve(), self.mod.resolve())
+        self.assertFalse(self.cache.exists())
+        self.assertEqual(self.log("curl-log"), [])
+
+    def test_without_npm_setup_installs_text_art_and_warns(self):
+        self.hide_npm()
+        result = self.run_setup()
+        self.assertTrue((self.cache / "bin/mermaid-ascii").is_file())
+        self.assertFalse((self.cache / "node_modules").exists())
+        self.assertIn("npm not found; images skipped", result.stderr)
+
+    def test_a_checksum_mismatch_installs_nothing(self):
+        self.checksums.write_text(re.sub(r"^[0-9a-f]{64}", "0" * 64, self.checksums.read_text(),
+                                         flags=re.M))
+        result = self.run_setup()
+        self.assertIn("checksum mismatch", result.stderr)
+        self.assertFalse((self.cache / "bin/mermaid-ascii").exists())
+        self.assertFalse((self.cache / ".mermaid-ascii-version").exists())
+
+    def test_an_unmanaged_cache_is_left_alone(self):
+        self.cache.mkdir(parents=True)
+        (self.cache / "mine").write_text("keep\n")
+        result = self.run_setup()
+        self.assertIn("not managed by this repo", result.stderr)
+        self.assertEqual(sorted(p.name for p in self.cache.iterdir()), ["mine"])
+        self.run_setup("--uninstall")
+        self.assertEqual((self.cache / "mine").read_text(), "keep\n")
+
+    def test_removed_mods_are_pruned_and_uninstall_removes_links_and_cache(self):
+        self.run_setup()
+        old = self.claude / "old-mod"
+        old.symlink_to(self.repo.resolve() / "mods/old-mod")
+        foreign = self.claude / "foreign"
+        foreign.symlink_to(self.base / "missing")
+        # --sync prunes the same way but prints nothing.
+        result = self.run_setup()
+        self.assertIn("pruned: mods/old-mod", result.stdout)
+        self.assertFalse(old.is_symlink())
+        self.assertTrue(foreign.is_symlink())
+        self.run_setup("--uninstall")
+        self.assertFalse((self.claude / "mermaid-render").is_symlink())
+        self.assertFalse(self.cache.exists())
+        self.assertTrue(foreign.is_symlink())
+
+    def test_uninstall_keeps_the_cache_while_another_clone_links_the_mod(self):
+        self.run_setup()
+        other = self.base / "other/mods/mermaid-render"
+        other.mkdir(parents=True)
+        (self.claude / "mermaid-render").unlink()
+        (self.claude / "mermaid-render").symlink_to(other)
+        self.run_setup("--uninstall")
+        self.assertTrue((self.claude / "mermaid-render").is_symlink())
+        self.assertTrue((self.cache / "bin/mermaid-ascii").is_file())
 
 
 if __name__ == "__main__":

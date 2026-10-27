@@ -178,6 +178,27 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertTrue(self.is_junction(claude_link))
         self.assertEqual(claude_link.resolve(), (moved / "skills/shared-one").resolve())
 
+    def test_mods_are_junctioned_pruned_and_uninstalled(self):
+        # Not named mermaid-render: that one would download the real renderers.
+        mod = self.repo / "mods/example-mod"
+        (mod / ".claude-plugin").mkdir(parents=True)
+        (mod / ".claude-plugin/plugin.json").write_text('{"name": "example-mod"}\n')
+        doomed = self.repo / "mods/doomed-mod"
+        doomed.mkdir()
+        self.run_setup()
+        link = self.claude / "example-mod"
+        self.assertTrue(self.is_junction(link))
+        self.assertEqual(link.resolve(), mod.resolve())
+        self.assertTrue(self.is_junction(self.claude / "doomed-mod"))
+        doomed.rmdir()
+        self.run_setup("--sync")
+        self.assertFalse(self.is_junction(self.claude / "doomed-mod"))
+        self.assertFalse((self.claude / "doomed-mod").exists())
+        self.run_setup("--uninstall")
+        self.assertFalse(self.is_junction(link))
+        self.assertFalse(link.exists())
+        self.assertTrue((mod / ".claude-plugin/plugin.json").is_file())
+
     def agents_paths(self):
         (self.home / ".codex").mkdir(exist_ok=True)
         (self.home / ".pi/agent").mkdir(parents=True, exist_ok=True)

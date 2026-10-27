@@ -242,6 +242,133 @@ link_pi() {
   done
 }
 
+# Every folder under mods/ is a Claude Code mod. Claude Code loads a plugin
+# from ~/.claude/skills/<name>, so each mod is linked there under its own name,
+# and a link into this clone's mods/ whose target is gone is pruned.
+link_mods() {
+  local root="$HOME/.claude/skills" mod
+  [ -d "$HOME/.claude" ] || return 0
+  [ -d "$REPO/mods" ] || return 0
+  mkdir -p "$root"
+  for mod in "$REPO"/mods/*/; do
+    [ -d "$mod" ] || continue
+    link_dir "$root/$(basename "$mod")" "${mod%/}"
+  done
+  if is_windows; then
+    prune_junctions "$root" "$REPO/mods"
+    return 0
+  fi
+  for mod in "$root"/*; do
+    [ -L "$mod" ] || continue
+    case "$(readlink "$mod")" in
+      "$REPO"/mods/*) [ -e "$mod" ] || { rm "$mod"; echo "pruned: mods/$(basename "$mod")"; } ;;
+    esac
+  done
+}
+
+# The renderers the mermaid-render mod runs, in a cache this script owns. Only
+# a setup run installs them: --sync runs inside a 30-second session hook, too
+# short for a Chromium download.
+MERMAID_CACHE="$HOME/.cache/mermaid-render"
+MERMAID_MARK="$HOME/.cache/mermaid-render/.agents-managed"
+MERMAID_ASCII_VERSION="1.6.1"
+MERMAID_CLI_VERSION="12.0.0"
+
+# The release archive of mermaid-ascii for this OS and CPU.
+mermaid_ascii_asset() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os=Linux ;;
+    Darwin) os=Darwin ;;
+    MINGW*|MSYS*|CYGWIN*) os=Windows ;;
+    *) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x86_64 ;;
+    arm64|aarch64) arch=arm64 ;;
+    *) return 1 ;;
+  esac
+  if [ "$os" = Windows ]; then
+    echo "mermaid-ascii_${os}_${arch}.zip"
+  else
+    echo "mermaid-ascii_${os}_${arch}.tar.gz"
+  fi
+}
+
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+install_mermaid_ascii() {
+  local asset url tmp expected
+  [ "$(cat "$MERMAID_CACHE/.mermaid-ascii-version" 2>/dev/null)" = "$MERMAID_ASCII_VERSION" ] && return 0
+  asset="$(mermaid_ascii_asset)" || { echo "warn: mermaid-render: no mermaid-ascii build for this OS" >&2; return 1; }
+  url="https://github.com/AlexanderGrooff/mermaid-ascii/releases/download/$MERMAID_ASCII_VERSION"
+  tmp="$MERMAID_CACHE/download"
+  rm -rf "$tmp" && mkdir -p "$tmp" "$MERMAID_CACHE/bin" || return 1
+  if ! curl -fsSL -o "$tmp/$asset" "$url/$asset" ||
+    ! curl -fsSL -o "$tmp/checksums.txt" "$url/mermaid-ascii_${MERMAID_ASCII_VERSION}_checksums.txt"; then
+    echo "warn: mermaid-render: could not download mermaid-ascii" >&2
+    rm -rf "$tmp"
+    return 1
+  fi
+  expected="$(grep -F " $asset" "$tmp/checksums.txt" | cut -d' ' -f1)"
+  if [ -z "$expected" ] || [ "$(sha256 "$tmp/$asset")" != "$expected" ]; then
+    echo "warn: mermaid-render: mermaid-ascii checksum mismatch; not installed" >&2
+    rm -rf "$tmp"
+    return 1
+  fi
+  if is_windows; then
+    powershell -NoProfile -Command "Expand-Archive -Force -LiteralPath '$(cygpath -w "$tmp/$asset")' -DestinationPath '$(cygpath -w "$tmp")'" >/dev/null &&
+      mv -f "$tmp/mermaid-ascii.exe" "$MERMAID_CACHE/bin/mermaid-ascii.exe"
+  else
+    tar -xzf "$tmp/$asset" -C "$tmp" mermaid-ascii && mv -f "$tmp/mermaid-ascii" "$MERMAID_CACHE/bin/mermaid-ascii"
+  fi || { echo "warn: mermaid-render: could not unpack mermaid-ascii" >&2; rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  printf '%s\n' "$MERMAID_ASCII_VERSION" > "$MERMAID_CACHE/.mermaid-ascii-version"
+  echo "installed: mermaid-ascii $MERMAID_ASCII_VERSION"
+}
+
+# mermaid-cli brings its own headless Chromium through Puppeteer, kept inside
+# the cache rather than Puppeteer's default ~/.cache/puppeteer.
+install_mermaid_cli() {
+  [ "$(cat "$MERMAID_CACHE/.mermaid-cli-version" 2>/dev/null)" = "$MERMAID_CLI_VERSION" ] && return 0
+  if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    echo "warn: mermaid-render: npm not found; images skipped, diagrams render as text" >&2
+    return 0
+  fi
+  echo "installing: mermaid-cli $MERMAID_CLI_VERSION with Chromium (about 1 GB)"
+  if ! PUPPETEER_CACHE_DIR="$MERMAID_CACHE/puppeteer" npm install --prefix "$MERMAID_CACHE" \
+    --no-fund --no-audit --loglevel=error "@mermaid-js/mermaid-cli@$MERMAID_CLI_VERSION" >/dev/null; then
+    echo "warn: mermaid-render: npm install failed; images skipped" >&2
+    return 0
+  fi
+  printf '%s\n' "$MERMAID_CLI_VERSION" > "$MERMAID_CACHE/.mermaid-cli-version"
+  echo "installed: mermaid-cli $MERMAID_CLI_VERSION"
+}
+
+install_mermaid_renderers() {
+  [ -d "$HOME/.claude" ] || return 0
+  [ -d "$REPO/mods/mermaid-render" ] || return 0
+  if [ -d "$MERMAID_CACHE" ] && [ ! -e "$MERMAID_MARK" ]; then
+    echo "warn: $MERMAID_CACHE exists and is not managed by this repo; renderers skipped" >&2
+    return 0
+  fi
+  mkdir -p "$MERMAID_CACHE" && : > "$MERMAID_MARK" || return 0
+  install_mermaid_ascii
+  install_mermaid_cli
+  return 0
+}
+
+remove_mermaid_renderers() {
+  [ -e "$MERMAID_MARK" ] || return 0
+  rm -rf "$MERMAID_CACHE" && echo "removed: $MERMAID_CACHE"
+}
+
 # Physical path of a file, following every link in a chain; fails on a loop or
 # a missing directory along the way.
 resolve_file() {
@@ -1130,6 +1257,7 @@ reconcile() {
   link_skills
   link_claude_skills
   link_pi
+  link_mods
   link_agents_md
   link_commands
   apply_hooks merge
@@ -1167,6 +1295,14 @@ uninstall() {
       "$repo_skills"/*) unlink_dir "$d" && echo "removed: $d" ;;
     esac
   done
+  # Every link into this clone's mods/. The renderer cache is shared by every
+  # clone, so it goes only when no other clone's mermaid-render link is left.
+  for d in "$root"/*; do
+    case "$(link_target "$d")" in
+      "$(unix_path "$REPO/mods")"/*) unlink_dir "$d" && echo "removed: $d" ;;
+    esac
+  done
+  [ -e "$root/mermaid-render" ] || remove_mermaid_renderers
   # Every link into this clone's pi/, including one left by a renamed extension.
   for pi in "$HOME/.pi/agent/extensions"/*; do
     case "$(link_target "$pi")" in
@@ -1214,7 +1350,7 @@ main() {
   case "$MODE" in
     --uninstall) uninstall ;;
     --sync) pull "$MODE"; reconcile >/dev/null ;;
-    setup) pull "$@"; reconcile; next_steps ;;
+    setup) pull "$@"; reconcile; install_mermaid_renderers; next_steps ;;
   esac
   # Returning rather than exiting: `main "$@"` is the last line, so the status
   # is the same, and an `exit` here would make ShellCheck read everything the

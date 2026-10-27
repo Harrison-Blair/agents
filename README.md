@@ -17,6 +17,7 @@ hooks/claude.json        SessionStart entry merged into ~/.claude/settings.json
 hooks/codex.json         SessionStart entry merged into ~/.codex/hooks.json
 hooks/cursor.json        sessionStart entry merged into ~/.cursor/hooks.json
 pi/<name>/               Pi extensions (agents-autopull, ask-user-question, statusline), linked into ~/.pi/agent/extensions
+mods/<name>/             Claude Code mods (mermaid-render), linked into ~/.claude/skills
 statusline/              statusline renderer and its shared config.json
 scripts/setup.sh         one-time setup, and the --sync command the hooks run
 ```
@@ -73,6 +74,17 @@ absent:
 - Links each Pi extension in `pi/` into `~/.pi/agent/extensions/<name>`, and
   prunes a link there that points into this clone's `pi/` at something gone,
   such as an extension that was renamed.
+- Links each Claude Code mod in `mods/` into `~/.claude/skills/<name>`, where
+  Claude Code loads it as a plugin, and prunes a link there that points into
+  this clone's `mods/` at something gone. Nothing is linked when `~/.claude`
+  does not exist.
+- Setup only, never `--sync`: installs the renderers the `mermaid-render` mod
+  runs into `~/.cache/mermaid-render`. That is the `mermaid-ascii` binary,
+  checked against its release checksum, and `@mermaid-js/mermaid-cli` with its
+  own Chromium (about 1 GB). Without `npm` and `node`, only `mermaid-ascii` is
+  installed and diagrams draw as character art. A repeat run downloads nothing
+  when the pinned versions are in place. An existing `~/.cache/mermaid-render`
+  that setup did not create is left alone with a warning.
 - Links `global/AGENTS.md` into `~/.agents` and each harness; see
   [AGENTS.md](#agentsmd).
 - Writes a small wrapper into `~/.local/bin` for every command a skill ships in
@@ -208,6 +220,8 @@ Codex's `[tui].status_line` is always managed.
 This reverses what setup installed for that clone and prints each removal: the
 skill links in `~/.agents/skills` that point into it, the links in
 `~/.claude/skills` that point at those, every Pi extension link into its `pi/`,
+every mod link into its `mods/`, the `~/.cache/mermaid-render` renderers when
+setup created them and no other clone's `mermaid-render` link remains,
 the `AGENTS.md` links and managed copies (the harness files only while
 `~/.agents/AGENTS.md` is this clone's), the command wrappers in `~/.local/bin`
 that run its skills' commands, the hook entries running that clone's `--sync`,
