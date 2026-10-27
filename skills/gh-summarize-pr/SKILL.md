@@ -1,14 +1,12 @@
 ---
 name: gh-summarize-pr
-description: Investigate a GitHub pull request with the GitHub CLI, summarize its changes in a concise PR-body format, and draft or apply a one-line title and body. Use when a user asks to inspect, explain, summarize, retitle, draft, or update a pull request.
+description: Update a GitHub pull request's title and body with the GitHub CLI. Draft a one-line title and a concise summary of the PR's changes, then apply them. Use when a user asks to summarize, retitle, or update a pull request.
 ---
 
 # Summarize a GitHub PR
 
 1. Identify the PR from the user's number or URL. If outside its repository, pass `--repo OWNER/REPO` or use the URL. If the user omits the PR, resolve the pull request for the current branch with `gh pr view`; ask for a number or URL only when resolution fails or is ambiguous.
-2. Apply the resolved PR's title and body automatically after drafting. Do not ask the user to select a mode or approve the draft.
-   - Honor explicit read-only intent, including draft-only or explanation-only requests. Return the draft without editing GitHub for these requests.
-   - Continue accepting a standalone `approve` argument for compatibility. It is optional and does not override an explicit read-only instruction.
+2. You may run `gh` commands that read the PR, its diff, and its checks. You may run `gh pr edit` on the resolved PR's title and body. Apply the drafted title and body immediately after drafting. Do not stop for confirmation.
 3. Run `gh pr view <PR> --json number,title,body,url,baseRefName,baseRefOid,headRefName,headRefOid,additions,deletions,changedFiles,commits,files`. Capture the full head and base commit SHAs as the snapshot being summarized. Select the review range using the existing footer as described below before reading the patch.
 4. Base new or revised claims on the selected diff, using commit messages only as supporting context. Carry forward relevant existing information, checking affected claims against the new changes; do not infer behavior that the changes do not establish.
 5. Draft a single-line PR title that summarizes the overall major effort. Prefer the outcome over a list of files or minor changes.
@@ -85,6 +83,6 @@ Follow this output contract:
 
 ## Apply the update
 
-Authorization covers only the resolved PR's title and body. Before applying, re-read the PR head, base, title, and body. Reconcile concurrent changes and review any newly required diff before updating the footer. Refresh verification evidence when the reviewed head changes. Do not request approval for the reconciled draft. If the PR keeps changing, stop and return the latest draft with an explanation.
+Before applying, re-read the PR head, base, title, and body. Reconcile concurrent changes and review any newly required diff before updating the footer. Refresh verification evidence when the reviewed head changes. If the PR keeps changing, stop and return the latest draft with an explanation.
 
-For an explicit read-only request, return the title and body without applying them. Otherwise, write the body to a temporary file. Apply it with `gh pr edit <PR> --title "<title>" --body-file <file>`. Pass the title as a safely quoted argument. Remove the temporary file after the edit attempt. After success, report the PR URL, applied title, and that the body was updated. If the edit fails, report the failure without claiming success or changing the target.
+Write the body to a temporary file. Apply it with `gh pr edit <PR> --title "<title>" --body-file <file>`. Pass the title as a safely quoted argument. Remove the temporary file after the edit attempt. After success, report the PR URL, applied title, and that the body was updated. If the edit fails, report the failure without claiming success or changing the target.
