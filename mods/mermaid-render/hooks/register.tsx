@@ -9,6 +9,8 @@ const FENCE = /^```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm
 const DIRECTION = /^[ \t]*direction[ \t]+(TB|TD|BT|LR|RL)[ \t]*$/gm
 const MAX_ROWS = 40
 const MISSING = 'renderers not installed; run scripts/setup.sh in the agents repo'
+// Ubuntu 23.10+ blocks the user namespaces Chromium's sandbox needs.
+const NO_SANDBOX = /No usable sandbox/
 
 export type Part =
   | { kind: 'markdown'; text: string }
@@ -105,11 +107,22 @@ async function renderDiagram($: EngineInterface, id: string, source: string, mod
     let cli = { exitCode: 0, stderr: '' }
     if (!(await $.fs.exists(output))) {
       await $.fs.write(input, source)
-      cli = await run(
-        $,
-        ['node', paths.cli, '-q', '-i', input, '-o', output, '-t', 'dark', '-b', 'transparent', '-s', '2'],
-        { env: { PUPPETEER_CACHE_DIR: `${paths.dir}/puppeteer` }, timeoutMs: 30_000 },
-      )
+      const mmdc = async (unsandboxed: boolean) => {
+        const argv = ['node', paths.cli, '-q', '-i', input, '-o', output, '-t', 'dark', '-b', 'transparent', '-s', '2']
+        if (unsandboxed) {
+          const config = `${paths.dir}/renders/no-sandbox.json`
+          await $.fs.write(config, '{"args":["--no-sandbox"]}')
+          argv.push('-p', config)
+        }
+        return run($, argv, { env: { PUPPETEER_CACHE_DIR: `${paths.dir}/puppeteer` }, timeoutMs: 30_000 })
+      }
+      // Where the sandbox is blocked, Chromium runs without it: the person
+      // chose images there over character art.
+      cli = await mmdc(sandboxBlocked)
+      if (cli.exitCode !== 0 && !sandboxBlocked && NO_SANDBOX.test(cli.stderr)) {
+        sandboxBlocked = true
+        cli = await mmdc(true)
+      }
     }
     if (cli.exitCode === 0) {
       const { base64 } = await $.fs.read(output, { as: 'bytes' })
@@ -124,6 +137,7 @@ async function renderDiagram($: EngineInterface, id: string, source: string, mod
 // Module state: a reload forgets what it scheduled, and the next draw
 // schedules again.
 const scheduled = new Set<string>()
+let sandboxBlocked = false
 
 export const register: Register = (on, options) => {
   const mode = String(options.mode ?? 'auto')

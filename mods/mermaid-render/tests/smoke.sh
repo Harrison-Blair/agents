@@ -17,8 +17,19 @@ case "$art" in
   *) echo "smoke: mermaid-ascii drew no boxes" >&2; exit 1 ;;
 esac
 
-PUPPETEER_CACHE_DIR="$cache/puppeteer" node "$cache/node_modules/@mermaid-js/mermaid-cli/src/cli.js" \
-  -q -i "$work/in.mmd" -o "$work/out.png" -t dark -b transparent -s 2
+mmdc() {
+  PUPPETEER_CACHE_DIR="$cache/puppeteer" node "$cache/node_modules/@mermaid-js/mermaid-cli/src/cli.js" \
+    -q -i "$work/in.mmd" -o "$work/out.png" -t dark -b transparent -s 2 "$@"
+}
+# Like the mod: where Chromium's sandbox is blocked (Ubuntu 23.10+), retry once
+# without it.
+if ! mmdc 2> "$work/err"; then
+  cat "$work/err" >&2
+  grep -q "No usable sandbox" "$work/err" || exit 1
+  echo "smoke: sandbox blocked; retrying without it"
+  printf '{"args":["--no-sandbox"]}' > "$work/no-sandbox.json"
+  mmdc -p "$work/no-sandbox.json"
+fi
 signature="$(head -c 8 "$work/out.png" | od -An -tx1 | tr -d ' \n')"
 if [ "$signature" != 89504e470d0a1a0a ]; then
   echo "smoke: mermaid-cli wrote no PNG" >&2

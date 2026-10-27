@@ -38,23 +38,32 @@ function world(
     stdout = `${ART}\n`,
     exitCode = 0,
     stderr = '',
+    answer = (_: Run) => ({ exitCode, stdout, stderr }),
   } = {},
 ) {
   const runs: Run[] = []
+  const writes: { path: string; text: string }[] = []
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine: {(e.props as { text: string }).text}</Text>
   })
   on('env.get', (_, e) => ({ value: env[e.name] }))
-  // The host resolves a path: a C:/ path is relative on a Linux test host.
-  on('fs.exists', (_, e) => ({ value: files.some(file => e.path.endsWith(file)) }))
-  on('fs.write', () => ({ value: undefined }))
+  // The host resolves a path: a C:/ path is relative on a Linux test host,
+  // and a Windows host spells the result with backslashes.
+  on('fs.exists', (_, e) => {
+    const path = e.path.replaceAll('\\', '/')
+    return { value: files.some(file => path.endsWith(file)) }
+  })
+  on('fs.write', (_, e) => {
+    writes.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
   on('fs.read', () => ({ value: { base64: PNG } }))
   on('process.run', (_, e) => {
     runs.push(e)
-    return { value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { ...answer(e), isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  return { runs, clock: mock.clock(on) }
+  return { runs, writes, clock: mock.clock(on) }
 }
 
 test('a reply with no mermaid block is drawn by the engine unchanged', async ($, on) => {
@@ -115,6 +124,53 @@ test('auto mode draws the mermaid-cli PNG, run through node, with the art as alt
   // viewport leaves; 4:1 pixels on 1:2 cells is 76 / 8 = 9.5 rows.
   expect(image?.props.columns).toBe(76)
   expect(image?.props.rows).toBe(10)
+  await ui.unmount()
+})
+
+test('where the sandbox is blocked, mermaid-cli retries once without it, then skips it', async ($, on) => {
+  const cli = `${CACHE}/node_modules/@mermaid-js/mermaid-cli/src/cli.js`
+  const config = `${CACHE}/renders/no-sandbox.json`
+  const { runs, writes, clock } = world(on, {
+    files: [`${CACHE}/bin/mermaid-ascii`, cli],
+    answer: run =>
+      run.argv[0] === 'node' && !run.argv.includes('-p')
+        ? { exitCode: 1, stdout: '', stderr: 'Error: Failed to launch the browser process\nFATAL: No usable sandbox!\n' }
+        : { exitCode: 0, stdout: `${ART}\n`, stderr: '' },
+  })
+  const first = await $.ui.mount(message(REPLY))
+  await clock.advance(1)
+
+  const mmdc = () => runs.filter(run => run.argv[0] === 'node')
+  expect(mmdc().map(run => run.argv.includes('-p'))).toEqual([false, true])
+  expect(mmdc()[1]?.argv.slice(-2)).toEqual(['-p', config])
+  expect(writes).toContainEqual({ path: config, text: '{"args":["--no-sandbox"]}' })
+  expect(await first.find({ type: 'Image' })).toBeDefined()
+  await first.unmount()
+
+  // A later diagram goes straight to the unsandboxed run.
+  const second = await $.ui.mount({ ...message('```mermaid\nflowchart LR\n  C --> D\n```'), requestId: 'm2' })
+  await clock.advance(1)
+  expect(mmdc().map(run => run.argv.includes('-p'))).toEqual([false, true, true])
+  expect(await second.find({ type: 'Image' })).toBeDefined()
+  await second.unmount()
+})
+
+test('a mermaid-cli failure that is not the sandbox is not retried', async ($, on) => {
+  const cli = `${CACHE}/node_modules/@mermaid-js/mermaid-cli/src/cli.js`
+  const { runs, clock } = world(on, {
+    files: [`${CACHE}/bin/mermaid-ascii`, cli],
+    answer: run =>
+      run.argv[0] === 'node'
+        ? { exitCode: 1, stdout: '', stderr: 'Error: Parse error on line 2\n' }
+        : { exitCode: 0, stdout: `${ART}\n`, stderr: '' },
+  })
+  const ui = await $.ui.mount(message(REPLY))
+  await clock.advance(1)
+
+  expect(runs.filter(run => run.argv[0] === 'node')).toHaveLength(1)
+  expect((await ui.find({ type: 'Text', text: /^mermaid-render:/ }))?.text).toBe(
+    'mermaid-render: Error: Parse error on line 2',
+  )
   await ui.unmount()
 })
 
