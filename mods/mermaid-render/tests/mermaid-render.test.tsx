@@ -55,7 +55,7 @@ function world(
     return { value: files.some(file => path.endsWith(file)) }
   })
   on('fs.write', (_, e) => {
-    writes.push({ path: e.path, text: e.text })
+    writes.push({ path: e.path.replaceAll('\\', '/'), text: e.text })
     return { value: undefined }
   })
   on('fs.read', () => ({ value: { base64: PNG } }))
@@ -143,7 +143,7 @@ test('where the sandbox is blocked, mermaid-cli retries once without it, then sk
   const mmdc = () => runs.filter(run => run.argv[0] === 'node')
   expect(mmdc().map(run => run.argv.includes('-p'))).toEqual([false, true])
   expect(mmdc()[1]?.argv.slice(-2)).toEqual(['-p', config])
-  expect(writes).toContainEqual({ path: config, text: '{"args":["--no-sandbox"]}' })
+  expect(writes.some(write => write.path.endsWith(config) && write.text === '{"args":["--no-sandbox"]}')).toBe(true)
   expect(await first.find({ type: 'Image' })).toBeDefined()
   await first.unmount()
 
