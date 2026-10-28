@@ -25,10 +25,10 @@
 
 Before implementing:
 
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them.
+- State assumptions that materially affect the result.
+- Ask when uncertainty or multiple interpretations could materially change the result.
+- Resolve routine choices from the available context.
 - If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop and name what is unclear.
 
 ## 2. Simplicity First
 
@@ -73,5 +73,5 @@ Strong success criteria support independent execution. Ask when a decision mater
 A test counts only if it fails when the behavior breaks and passes when the behavior is correct.
 
 - For a bug fix, run the new test against the unfixed or deliberately broken behavior and confirm it fails, then confirm it passes with the fix.
-- For a feature, temporarily break or stub the feature and confirm the new test fails, then restore it and confirm the test passes.
-- Never trust a test that has only been observed passing.
+- For consequential or complex feature behavior, temporarily break or stub the feature. Check that the new test fails. Restore the feature and check that the test passes.
+- For straightforward, low-impact feature behavior, use judgment to decide whether to check the test against broken behavior.
