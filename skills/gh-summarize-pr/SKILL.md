@@ -1,24 +1,24 @@
 ---
 name: gh-summarize-pr
-description: Update a GitHub pull request's title and body with the GitHub CLI. Draft a one-line title and a concise summary of the PR's changes, then apply them. Use when a user asks to summarize, retitle, or update a pull request.
+description: Summarize or update a GitHub pull request using the GitHub CLI. Use when asked to summarize, retitle, or update a PR.
 ---
 
 # Summarize a GitHub PR
 
 1. Identify the PR from the user's number or URL. If outside its repository, pass `--repo OWNER/REPO` or use the URL. If the user omits the PR, resolve the pull request for the current branch with `gh pr view`; ask for a number or URL only when resolution fails or is ambiguous.
-2. You may run `gh` commands that read the PR, its diff, and its checks. You may run `gh pr edit` on the resolved PR's title and body. Apply the drafted title and body immediately after drafting. Do not stop for confirmation.
+2. Determine the requested fields. For a title-only or body-only request, update only that field. For a general summary request, update both. For a title-only request, skip body-specific accounting and verification evidence. You may run `gh` commands that read the PR, its diff, and its checks. You may run `gh pr edit` on the resolved PR's title and body. Apply the requested fields immediately after drafting. Do not stop for confirmation.
 3. Run `gh pr view <PR> --json number,title,body,url,baseRefName,baseRefOid,headRefName,headRefOid,additions,deletions,changedFiles,commits,files`. Capture the full head and base commit SHAs as the snapshot being summarized. Select the review range using the existing footer as described below before reading the patch.
 4. Base new or revised claims on the selected diff, using commit messages only as supporting context. Carry forward relevant existing information, checking affected claims against the new changes; do not infer behavior that the changes do not establish.
-5. Draft a single-line PR title that summarizes the overall major effort. Prefer the outcome over a list of files or minor changes.
-6. Inspect repository instructions, manifests, and CI configuration to identify relevant verification evidence and gaps. Do not execute verification commands.
-7. Update the body to describe the whole PR at the captured head. Incorporate new changes and revise or remove statements made stale by reversals, replacements, or changed scope. Preserve relevant existing rationale, issue links, user-authored context, and verification evidence. Respect existing headings and repository templates; revise affected sections in place instead of replacing the body wholesale. Use the fallback below for an empty or placeholder-only body or an existing summary in this format.
+5. When updating the title, draft a single-line PR title that summarizes the overall major effort. Prefer the outcome over a list of files or minor changes.
+6. When updating the body, inspect repository instructions, manifests, and CI configuration to identify relevant verification evidence and gaps. Do not execute verification commands.
+7. When requested, update the body to describe the whole PR at the captured head. Incorporate new changes and revise or remove statements made stale by reversals, replacements, or changed scope. Preserve relevant existing rationale, issue links, user-authored context, and verification evidence. Respect existing headings and repository templates; revise affected sections in place instead of replacing the body wholesale. Use the fallback below for an empty or placeholder-only body or an existing summary in this format.
 
 ## Select the review range
 
 - Read the `Reviewed commit` and `Base commit` SHAs from the existing summary footer. Treat them as a reusable checkpoint only when they are full commit SHAs, resolve to available commits, the reviewed commit is an ancestor of the captured PR head, the recorded base matches the captured PR base, and the body contains a usable prior summary. Validate ancestry with `git merge-base --is-ancestor <reviewed-sha> <head-sha>` or an equivalent repository API check; do not trust a footer alone.
 - With a valid checkpoint, inspect `git diff <reviewed-sha> <head-sha>` (the endpoint diff) or an equivalent complete comparison. Focus review on those new changes and reuse still-relevant prior context; inspect older code or diffs only as needed to resolve affected or uncertain claims. If the head is unchanged, there is no new diff to review.
 - Without a usable checkpoint, or after a rebase, force-push that breaks ancestry, or base change, review the full PR diff from the captured base/head merge base to the captured head, for example `git diff <base-sha>...<head-sha>`. Fetch missing commits without changing the user's working tree when needed. Explain briefly why a full review was necessary. Do not advance the checkpoint if the required diff cannot be obtained and reviewed completely.
-- Keep the title, body, and LOC table cumulative for the entire PR. Recompute LOC from the full PR diff at the captured snapshot even during an incremental review; do not add incremental counts to old totals, since edits and reversions can overlap.
+- Keep each updated field cumulative for the entire PR. When updating the body, recompute LOC from the full PR diff at the captured snapshot even during an incremental review. Do not add incremental counts to old totals, since edits and reversions can overlap.
 
 ## Fallback body
 
@@ -31,15 +31,18 @@ description: Update a GitHub pull request's title and body with the GitHub CLI. 
 
 ## LOC by category
 
-| Category | New | Edited | Deleted | Moved | LOC + | LOC − |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Code | 2 | 3 | 1 | 1 | 40 | 10 |
-| Tests | 1 | 2 | 0 | 0 | 20 | 5 |
-| Docs | 0 | 1 | 0 | 0 | 8 | 2 |
-| Other | 0 | 0 | 0 | 0 | 0 | 0 |
+| Category | Files | LOC + | LOC − |
+| --- | ---: | ---: | ---: |
+| Code | 7 | 55 | 12 |
+| ↳ Substantive code | — | 40 | 8 |
+| ↳ Boilerplate | — | 10 | 2 |
+| ↳ Comments and blank lines | — | 5 | 2 |
+| Tests | 3 | 20 | 5 |
+| Docs | 1 | 8 | 2 |
+| Other | 0 | 0 | 0 |
 
-*New, Edited, Deleted, and Moved count files. LOC + and LOC − count added and deleted text lines.*
-*LOC counts are added and deleted text lines in the PR diff, including blank lines and comments.*
+*Files counts changed files. LOC + and LOC − count added and deleted text lines.*
+*Code subcategories partition the Code line counts. Binary content is excluded from LOC.*
 
 ## Verification
 
@@ -67,10 +70,11 @@ Follow this output contract:
   - `Tests`: tests and their dedicated fixtures, snapshots, and helpers. Test purpose takes precedence over file extension.
   - `Docs`: documentation.
   - `Other`: everything else, including build configuration, lockfiles, CI workflows, and generated assets.
-- Count each file once as `New`, `Edited`, `Deleted`, or `Moved`. `Moved` includes renames, including those with content edits. Use the destination category for moves and the original path for deletions. Treat mode-only changes as `Edited`.
+- Count each changed file once. Use the destination category for renames and the original path for deletions. Include mode-only changes in file counts.
 - Use complete per-file statuses and line statistics for the captured full PR diff. Use rename detection consistently for statuses and line statistics. For local Git, compare the captured base/head merge base to the captured head. Do not use the working tree or base tip. Machine-readable diff status and numstat output can supply missing metadata.
 - Check completeness against the PR's changed-file count. Get all pages when necessary. Reconcile summed text additions and deletions with the PR metadata. Disclose unavailable statistics or unresolved discrepancies. Do not estimate from truncated patches or present incomplete counts as complete.
 - Count only reported text additions and deletions in `LOC +` and `LOC −`. Pure renames and mode-only changes contribute zero text lines. Exclude binary content from LOC. Note binary exclusions by category without listing files. Never represent unavailable text statistics as zero.
+- Split Code lines into substantive code, boilerplate, and comments and blank lines. Boilerplate comprises imports, package declarations, and generated code. Count all other code as substantive. Count a line containing code and a trailing comment as code. Classify additions and deletions independently using the relevant file version. Disclose uncertain language, comment syntax, or generated status. Do not present uncertain classifications as exact. Reconcile the subcategory line counts with the Code totals. Show the Code file count only on its parent row.
 - Render `Code`, `Tests`, `Docs`, and `Other` in that order. Show `0` for empty categories. Omit percentages, net lines, and a total row. Briefly explain what a nonempty `Other` category contains below the table. If there are no changed files, state `No changed files.` instead of rendering an empty table.
 
 ## Verification evidence
@@ -83,6 +87,6 @@ Follow this output contract:
 
 ## Apply the update
 
-Before applying, re-read the PR head, base, title, and body. Reconcile concurrent changes and review any newly required diff before updating the footer. Refresh verification evidence when the reviewed head changes. If the PR keeps changing, stop and return the latest draft with an explanation.
+Before applying, re-read the PR head, base, title, and body. Reconcile concurrent changes and review any newly required diff. When updating the body, refresh the footer and refresh verification evidence if the reviewed head changes. If the PR keeps changing, stop and return the latest draft with an explanation.
 
-Write the body to a temporary file. Apply it with `gh pr edit <PR> --title "<title>" --body-file <file>`. Pass the title as a safely quoted argument. Remove the temporary file after the edit attempt. After success, report the PR URL, applied title, and that the body was updated. If the edit fails, report the failure without claiming success or changing the target.
+When updating the body, write it to a temporary file. Apply both fields with `gh pr edit <PR> --title "<title>" --body-file <file>`. For a body-only request, omit `--title`. For a title-only request, omit `--body-file` and do not create a body file. Pass the title as a safely quoted argument. Remove the temporary file after the edit attempt. After success, report the PR URL and the fields updated. If the edit fails, report the failure without claiming success or changing the target.
