@@ -1,15 +1,6 @@
 {
   "name": "mermaid-render",
   "version": "0.1.0",
-  "description": "Render fenced mermaid blocks in replies as images or character art",
-  "types": "./types/index.d.ts",
-  "userConfig": {
-    "mode": {
-      "type": "string",
-      "title": "Diagram mode",
-      "description": "auto draws an image where the terminal can, character art elsewhere. text always draws character art.",
-      "default": "auto",
-      "options": ["auto", "text"]
-    }
-  }
+  "description": "Render fenced mermaid blocks in replies as colored character art",
+  "types": "./types/index.d.ts"
 }

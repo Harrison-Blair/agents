@@ -1,5 +1,5 @@
 export type Diagram =
-  | { status: 'done'; png?: string; art?: string }
+  | { status: 'done'; art: string }
   | { status: 'error'; reason: string }
 
 declare module 'claude-code' {

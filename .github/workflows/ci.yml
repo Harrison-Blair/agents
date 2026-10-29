@@ -126,12 +126,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: '24'
-      # Setup links the mod and installs its renderers only where Claude Code is.
+      # Setup links the mod and installs its renderer only where Claude Code is.
       - name: Run setup
         run: mkdir -p ~/.claude && bash scripts/setup.sh
-      - name: Render with both renderers
+      - name: Render with mermaid-ascii
         run: bash mods/mermaid-render/tests/smoke.sh

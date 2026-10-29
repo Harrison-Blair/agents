@@ -78,12 +78,10 @@ absent:
   Claude Code loads it as a plugin, and prunes a link there that points into
   this clone's `mods/` at something gone. Nothing is linked when `~/.claude`
   does not exist.
-- Setup only, never `--sync`: installs the renderers the `mermaid-render` mod
+- Setup only, never `--sync`: installs the renderer the `mermaid-render` mod
   runs into `~/.cache/mermaid-render`. That is the `mermaid-ascii` binary,
-  checked against its release checksum, and `@mermaid-js/mermaid-cli` with its
-  own Chromium (about 1 GB). Without `npm` and `node`, only `mermaid-ascii` is
-  installed and diagrams draw as character art. A repeat run downloads nothing
-  when the pinned versions are in place. An existing `~/.cache/mermaid-render`
+  checked against its release checksum. A repeat run downloads nothing when
+  the pinned version is in place. An existing `~/.cache/mermaid-render`
   that setup did not create is left alone with a warning.
 - Links `global/AGENTS.md` into `~/.agents` and each harness; see
   [AGENTS.md](#agentsmd).

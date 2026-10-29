@@ -1,16 +1,22 @@
-import type { EngineInterface, Register } from 'claude-code'
+import type { Elements, EngineInterface, Register } from 'claude-code'
 
 import type { Diagram } from '../types'
 
-// scripts/setup.sh installs the renderers here: the mermaid-ascii binary, and
-// mermaid-cli with its own Chromium.
+// scripts/setup.sh installs the mermaid-ascii binary here.
 const CACHE = '.cache/mermaid-render'
 const FENCE = /^```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm
 const DIRECTION = /^[ \t]*direction[ \t]+(TB|TD|BT|LR|RL)[ \t]*$/gm
-const MAX_ROWS = 40
-const MISSING = 'renderers not installed; run scripts/setup.sh in the agents repo'
-// Ubuntu 23.10+ blocks the user namespaces Chromium's sandbox needs.
-const NO_SANDBOX = /No usable sandbox/
+// Compact spacing: no padding rows inside boxes, short gaps between them.
+const ASCII_FLAGS = ['-p', '0', '-x', '3', '-y', '2']
+// A node's label, quoted or not: A[text], A(text) or A{text}.
+const LABEL = /(\w)([[({])(?![[({])"?([^"\n\])}]*?)"?([\])}])/g
+const CLOSE: Record<string, string> = { '[': ']', '(': ')', '{': '}' }
+const EDGE_LABEL = /\|([^|\n]+)\|/g
+// A sequence message: From->>To: text.
+const MESSAGE = /^[ \t]*(\w+)[ \t]*[-.x)>]+[ \t]*(\w+)[ \t]*:[ \t]*(.+?)[ \t]*$/gm
+const CORNERS: Record<string, string> = { '┌': '╭', '┐': '╮', '└': '╰', '┘': '╯' }
+const ARROWHEADS = '►◄▲▼'
+const MISSING = 'mermaid-ascii not installed; run scripts/setup.sh in the agents repo'
 
 export type Part =
   | { kind: 'markdown'; text: string }
@@ -30,6 +36,35 @@ export function split(text: string): Part[] {
   return parts
 }
 
+// mermaid-ascii trims a label's spaces unless it is quoted, so quote each
+// flowchart label with a space on each side to keep text off the border.
+export function padLabels(source: string): string {
+  if (!/^\s*(graph|flowchart)\b/.test(source)) return source
+  return source.replace(LABEL, (match, id: string, open: string, text: string, close: string) =>
+    CLOSE[open] === close && text.trim() ? `${id}${open}" ${text.trim()} "${close}` : match,
+  )
+}
+
+// What each label in the source names: a node, or an edge or message.
+export function labelsOf(source: string): Map<string, 'node' | 'edge'> {
+  const labels = new Map<string, 'node' | 'edge'>()
+  for (const [, text = ''] of source.matchAll(EDGE_LABEL)) labels.set(text.trim(), 'edge')
+  for (const [, from = '', to = '', text = ''] of source.matchAll(MESSAGE)) {
+    labels.set(text, 'edge')
+    labels.set(from, 'node')
+    labels.set(to, 'node')
+  }
+  for (const [, , open = '', text = '', close = ''] of source.matchAll(LABEL)) {
+    if (CLOSE[open] === close) labels.set(text.trim(), 'node')
+  }
+  labels.delete('')
+  return labels
+}
+
+export function widthOf(art: string): number {
+  return Math.max(...art.split('\n').map(line => [...line].length))
+}
+
 // FNV-1a: a cache key, not a security boundary.
 function hash(text: string): string {
   let h = 0x811c9dc5
@@ -40,27 +75,14 @@ function hash(text: string): string {
   return (h >>> 0).toString(16).padStart(8, '0') + text.length.toString(16)
 }
 
+// mermaid-ascii logs a failure as time=… level=fatal msg="…": keep the message.
 function reasonOf(stderr: string, fallback: string): string {
   const lines = stderr.split('\n').map(line => line.trim()).filter(Boolean)
-  return lines.find(line => /error/i.test(line)) ?? lines[0] ?? fallback
-}
-
-// Cells are about twice as tall as wide; mmdc renders at scale 2, so one
-// cell is about 16 px of the PNG's width.
-export function imageBox(png: string, room: number) {
-  const head = atob(png.slice(0, 44))
-  const word = (at: number) =>
-    ((head.charCodeAt(at) << 24) | (head.charCodeAt(at + 1) << 16) | (head.charCodeAt(at + 2) << 8) | head.charCodeAt(at + 3)) >>> 0
-  // PNG's IHDR chunk holds the width and height at bytes 16 and 20.
-  const width = word(16)
-  const height = word(20)
-  let columns = Math.min(room, 255, Math.ceil(width / 16))
-  let rows = Math.max(1, Math.round((columns * height) / width / 2))
-  if (rows > MAX_ROWS) {
-    rows = MAX_ROWS
-    columns = Math.max(1, Math.round((rows * 2 * width) / height))
-  }
-  return { columns, rows }
+  const line = lines.find(line => /error|fatal/i.test(line)) ?? lines[0]
+  if (!line) return fallback
+  const message = /msg="((?:[^"\\]|\\.)*)"/.exec(line)?.[1] ?? line
+  const type = /unsupported graph type '([^']+)'/.exec(message)?.[1]
+  return type ? `${type} has no text renderer · showing source` : message
 }
 
 async function run($: EngineInterface, argv: string[], init: Parameters<EngineInterface['process']['run']>[1]) {
@@ -74,80 +96,61 @@ async function locate($: EngineInterface) {
   const home = isWindows
     ? ((await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '')
     : ((await $.env.get('HOME')) ?? '')
-  const dir = `${home.replaceAll('\\', '/')}/${CACHE}`
-  return {
-    dir,
-    ascii: `${dir}/bin/mermaid-ascii${isWindows ? '.exe' : ''}`,
-    // Run mermaid-cli's script through node: a call with no shell cannot run
-    // the mmdc.cmd shim npm writes on Windows.
-    cli: `${dir}/node_modules/@mermaid-js/mermaid-cli/src/cli.js`,
-  }
+  return `${home.replaceAll('\\', '/')}/${CACHE}/bin/mermaid-ascii${isWindows ? '.exe' : ''}`
 }
 
-async function renderDiagram($: EngineInterface, id: string, source: string, mode: string) {
-  const paths = await locate($)
-  const hasAscii = await $.fs.exists(paths.ascii)
-  const hasCli = mode !== 'text' && (await $.fs.exists(paths.cli))
-  if (!hasAscii && !hasCli) {
+async function renderDiagram($: EngineInterface, id: string, source: string, room: number) {
+  const ascii = await locate($)
+  if (!(await $.fs.exists(ascii))) {
     await $.state.set({ plugin: 'mermaid-render', key: 'diagrams', id }, { status: 'error', reason: MISSING })
     return
   }
-  const ascii = hasAscii
-    ? await run($, [paths.ascii], { stdin: source.replace(DIRECTION, ''), timeoutMs: 15_000 })
-    : { exitCode: 1, stdout: '', stderr: 'mermaid-ascii not installed' }
-  const art = ascii.exitCode === 0 && ascii.stdout.trim() ? ascii.stdout.trimEnd() : undefined
-  let diagram: Diagram
-  if (!hasCli) {
-    diagram = art
-      ? { status: 'done', art }
-      : { status: 'error', reason: reasonOf(ascii.stderr, 'mermaid-ascii failed') }
-  } else {
-    const input = `${paths.dir}/renders/${id}.mmd`
-    const output = `${paths.dir}/renders/${id}.png`
-    let cli = { exitCode: 0, stderr: '' }
-    if (!(await $.fs.exists(output))) {
-      await $.fs.write(input, source)
-      const mmdc = async (unsandboxed: boolean) => {
-        const argv = ['node', paths.cli, '-q', '-i', input, '-o', output, '-t', 'dark', '-b', 'transparent', '-s', '2']
-        if (unsandboxed) {
-          const config = `${paths.dir}/renders/no-sandbox.json`
-          await $.fs.write(config, '{"args":["--no-sandbox"]}')
-          argv.push('-p', config)
-        }
-        return run($, argv, { env: { PUPPETEER_CACHE_DIR: `${paths.dir}/puppeteer` }, timeoutMs: 30_000 })
-      }
-      // Where the sandbox is blocked, Chromium runs without it: the person
-      // chose images there over character art.
-      cli = await mmdc(sandboxBlocked)
-      if (cli.exitCode !== 0 && !sandboxBlocked && NO_SANDBOX.test(cli.stderr)) {
-        sandboxBlocked = true
-        cli = await mmdc(true)
-      }
-    }
-    if (cli.exitCode === 0) {
-      const { base64 } = await $.fs.read(output, { as: 'bytes' })
-      diagram = { status: 'done', png: base64, art }
-    } else {
-      diagram = { status: 'error', reason: reasonOf(cli.stderr, 'mmdc failed') }
-    }
-  }
+  const result = await run($, [ascii, ...ASCII_FLAGS, '--max-width', String(room)], {
+    stdin: padLabels(source.replace(DIRECTION, '')),
+    timeoutMs: 15_000,
+  })
+  const diagram: Diagram = result.exitCode === 0 && result.stdout.trim()
+    ? { status: 'done', art: result.stdout.trimEnd().replace(/[┌┐└┘]/g, corner => CORNERS[corner] ?? corner) }
+    : { status: 'error', reason: reasonOf(result.stderr, 'mermaid-ascii failed') }
   await $.state.set({ plugin: 'mermaid-render', key: 'diagrams', id }, diagram)
+}
+
+// One Text row per line: lines dim, node labels bold, edge labels and
+// arrowheads in the theme's claude color.
+function drawArt(Text: Elements['terminal']['Text'], art: string, labels: Map<string, 'node' | 'edge'>) {
+  const names = [...labels.keys()].sort((a, b) => b.length - a.length).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const token = new RegExp(`(?<!\\w)(${names.join('|') || '(?!)'})(?!\\w)|([${ARROWHEADS}])|([\u2500-\u257f]+)`, 'g')
+  return art.split('\n').map(line => {
+    const runs = []
+    let at = 0
+    for (const match of line.matchAll(token)) {
+      if (match.index > at) runs.push(line.slice(at, match.index))
+      const [text, label, arrowhead] = match
+      if (label) {
+        runs.push(labels.get(label) === 'node' ? <Text weight="bold">{text}</Text> : <Text color="claude">{text}</Text>)
+      } else if (arrowhead) {
+        runs.push(<Text color="claude">{text}</Text>)
+      } else {
+        runs.push(<Text dimColor>{text}</Text>)
+      }
+      at = match.index + text.length
+    }
+    if (at < line.length) runs.push(line.slice(at))
+    return <Text wrap="truncate-end">{runs.length ? runs : ' '}</Text>
+  })
 }
 
 // Module state: a reload forgets what it scheduled, and the next draw
 // schedules again.
 const scheduled = new Set<string>()
-let sandboxBlocked = false
 
-export const register: Register = (on, options) => {
-  const mode = String(options.mode ?? 'auto')
-
+export const register: Register = on => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal') return next(e)
     const parts = split(e.props.text)
     if (!parts.some(part => part.kind === 'mermaid')) return next(e)
 
-    const { Box, Text, Markdown, Image, Code } = $.ui.resolve(e)
+    const { Box, Text, Markdown } = $.ui.resolve(e)
     const room = Math.max(20, (e.viewport?.columns ?? 80) - 4)
     const drawn = []
     for (const [index, part] of parts.entries()) {
@@ -160,13 +163,13 @@ export const register: Register = (on, options) => {
         )
         continue
       }
-      const id = `${mode}-${hash(part.source)}`
+      const id = `${hash(part.source)}-${room}`
       const { value } = await $.state.get({ plugin: 'mermaid-render', key: 'diagrams', id })
       if (!value) {
         if (!scheduled.has(id)) {
           scheduled.add(id)
           $.clock.after(0, () => {
-            renderDiagram($, id, part.source, mode).catch(error =>
+            renderDiagram($, id, part.source, room).catch(error =>
               $.state.set({ plugin: 'mermaid-render', key: 'diagrams', id }, { status: 'error', reason: String(error) }),
             )
           })
@@ -179,14 +182,17 @@ export const register: Register = (on, options) => {
             <Text dimColor>mermaid-render: {value.reason}</Text>
           </Box>,
         )
-      } else if (value.png) {
+      } else if (widthOf(value.art) > room) {
         drawn.push(
-          <Box paddingLeft={2}>
-            <Image source={{ png: value.png }} {...imageBox(value.png, room)} alt={value.art ?? 'mermaid diagram'} />
+          <Box paddingLeft={2} flexDirection="column">
+            <Markdown text={part.fence} />
+            <Text dimColor>
+              mermaid-render: diagram is {widthOf(value.art)} columns, room for {room} · showing source
+            </Text>
           </Box>,
         )
       } else {
-        drawn.push(<Box paddingLeft={2}><Code source={value.art ?? ''} wrap="truncate-end" /></Box>)
+        drawn.push(<Box paddingLeft={2} flexDirection="column">{drawArt(Text, value.art, labelsOf(part.source))}</Box>)
       }
     }
     return <Box flexDirection="column">{drawn}</Box>
