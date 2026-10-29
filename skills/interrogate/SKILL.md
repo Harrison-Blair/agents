@@ -15,7 +15,7 @@ Read the relevant project files and prior conversation before asking questions. 
 
 Start an unclear idea with a concrete situation or example. Establish the goal, success criteria, and constraints before asking dependent implementation questions.
 
-Propose coherent designs and explain how they work. Identify gaps, conflicts, and implicit decisions. Bring meaningful design choices to the user with advice.
+Propose coherent designs and explain how they work. Identify gaps, conflicts, and implicit decisions.
 
 Cover these areas when they affect the intended result:
 
@@ -23,7 +23,11 @@ Cover these areas when they affect the intended result:
 - Architecture, interfaces, data, dependencies, and constraints.
 - Failure handling, delivery, and verification.
 
-Handle wording, formatting, and routine mechanical details autonomously. Keep accepted decisions, agent proposals, delegated details, and unresolved choices distinct.
+Bring every design decision to the user with advice. A design decision is a choice that affects behavior, structure, or an interface. Examples include interfaces, names that other code uses, data formats, dependencies, and file or module placement. Error handling, defaults, and limits are also design decisions.
+
+Decide only mechanical details yourself. Mechanical details are wording, formatting, and details with no effect on behavior, structure, or an interface. If you are not sure that a detail is mechanical, ask.
+
+Keep accepted decisions, agent proposals, delegated details, and unresolved choices distinct.
 
 ## Explain each decision before asking
 
@@ -79,7 +83,7 @@ Preserve answers to the other questions when a response is partial. Clarify ambi
 
 When the user needs help, address the specific confusion first. Explain the mechanism another way or use another diagram or concrete example. Then ask the unresolved question again.
 
-Do not silently choose meaningful implementation details. Let the user decide, explicitly delegate, or defer them. Revisit accepted decisions only after new evidence or a user correction.
+Do not silently choose design decisions. Let the user decide, explicitly delegate, or defer them. Revisit accepted decisions only after new evidence or a user correction.
 
 ## Resolve unknowns
 
@@ -97,7 +101,7 @@ Briefly connect each new round to the relevant accepted decisions. Restore the c
 
 Show each settled area as a short section of the developing plan. Let the user correct it before building dependent decisions on it.
 
-Finish when meaningful decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, and remaining unknowns.
+Finish when design decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, and remaining unknowns.
 
 Check shared understanding through the question tool when available. Revise affected sections after corrections. Identify deferred decisions that still block implementation.
 
