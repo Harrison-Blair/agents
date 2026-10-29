@@ -61,7 +61,7 @@ Place each diagram beside the explanation it supports, before the question tool.
 
 Use flows for behavior, trees for ownership, timelines for timing, and layouts for screen arrangements. Compare alternatives side by side when readable.
 
-Use Mermaid when the harness supports rendered diagrams. Otherwise, use aligned plain-text diagrams in fenced code blocks. Check labels, connections, and readability before sending.
+Use Mermaid when the harness supports rendered diagrams. Format Mermaid diagrams with [mermaid](../mermaid/SKILL.md). Otherwise, use aligned plain-text diagrams in fenced code blocks. Check labels, connections, and readability before sending.
 
 Split a crowded diagram into smaller diagrams. Avoid decoration and repeated pictures that add no understanding. Do not force a diagram onto an abstract choice it cannot explain.
 
