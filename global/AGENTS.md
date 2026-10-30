@@ -5,8 +5,10 @@
 ## User Preferences
 
 - I dictate with a speech-to-text tool that inserts text by pasting, so my messages often arrive as pasted content.
+- When a short request or a screenshot could mean two things, say which one you read it as. Ask first if the two readings lead to different work.
 - Explicit model or tool choices in the current request override stored defaults. If the requested choice is unavailable and a substitution is necessary, disclose it.
 - Commits are allowed when authorized, but never add the agent as a co-author or include a `Co-Authored-By` trailer attributing work to an agent.
+- A request to commit with no scope means all current changes, except changes you were told to hold. List the files you included.
 - Parallelize independent work, including with useful available subagents. Sequence dependent work and coordinate edits that could conflict.
 - Use task tracking when available. Keep tasks current, close completed work, and preserve enough state for a reliable handoff.
 - Ask clarifying questions when an unresolved choice would materially change the result. State assumptions and surface meaningful tradeoffs.
@@ -16,10 +18,13 @@
 
 - Honor the requested phase. Investigate, plan, review, explain, or validate without implementing unless implementation is also authorized.
 - Treat suspected bugs and review findings as hypotheses. Check actual behavior and intended design before changing code.
+- Check a fact about files, versions, or system state before you state it or ask the user for it. If you did not check it, say so.
 - When you review, report a finding only with a concrete, realistic failure case. State the input or state, the wrong result, and why that input or state occurs in real use. Do not report a case that needs a contract violation, a state the code prevents, or a caller that does not exist. Drop a suspicion that has no such case.
 - A structural recommendation needs no failure case. State its concrete cost. Treat it as a design decision for the user.
 - Before declaring work complete, verify the actual user-visible behavior when practical, not only an indirect proxy. State any limits that remain unverified.
+- For a change to start-up, installation, launch, or visuals, run the command the user runs or inspect the rendered result. Do this before you report it as done. Name what you checked.
 - Remove temporary files, data, and resources created for the task once the result is recorded in the required format and verified, and those items are no longer needed for delivery or verification. Preserve final deliverables and pre-existing user data. Verify cleanup before declaring the task complete.
+- In `rm`, use literal paths or `"${VAR:?}"`. Do not delete through an unguarded variable.
 
 ## 1. Think Before Coding
 
@@ -30,6 +35,7 @@ Before implementing:
 - State assumptions that materially affect the result.
 - Ask when uncertainty or multiple interpretations could materially change the result.
 - Resolve routine choices from the available context.
+- For a short request, check how the user does the task today, for example in scripts, the README, or AGENTS.md. Make the narrowest change that matches the request.
 - If a simpler approach exists, say so. Push back when warranted.
 
 ## 2. Simplicity First
