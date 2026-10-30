@@ -15,6 +15,8 @@ Read the relevant project files and prior conversation before asking questions. 
 
 Start an unclear idea with a concrete situation or example. Establish the goal, success criteria, and constraints before asking dependent implementation questions.
 
+Match the level of detail to the current focus of the user. Ask before you examine edge cases or storage details.
+
 Propose coherent designs and explain how they work. Identify gaps, conflicts, and implicit decisions.
 
 Cover these areas when they affect the intended result:
@@ -73,13 +75,19 @@ Split a crowded diagram into smaller diagrams. Avoid decoration and repeated pic
 
 Ask up to three related, independent questions per round. Give every question its own decision brief. Present all briefs before opening the question tool.
 
+When the user asks you to slow down, ask one question per round.
+
 Ask only questions with known facts and settled prerequisite decisions. Keep dependent questions for later rounds. Adjust the remaining questions after each answer.
 
 Keep tool options short and consistent with the brief. Put the recommendation first. Respect the tool's option limit. Accept the user's own answer or an explicit deferral.
 
+Do not put a project term or an identifier in an option label unless the brief defines it.
+
 Do not repeat the full explanation inside the tool. Do not reserve an option for simplification. In plain chat, invite numbered answers such as `1A, 2B`.
 
 Preserve answers to the other questions when a response is partial. Clarify ambiguous or contradictory answers before asking dependent questions. Do not treat silence or a request for explanation as acceptance.
+
+Treat text in an option note or a free-text answer as a reply. Answer each question in it in chat before you continue.
 
 When the user needs help, address the specific confusion first. Explain the mechanism another way or use another diagram or concrete example. Then ask the unresolved question again.
 
