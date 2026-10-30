@@ -16,6 +16,8 @@
 
 - Honor the requested phase. Investigate, plan, review, explain, or validate without implementing unless implementation is also authorized.
 - Treat suspected bugs and review findings as hypotheses. Check actual behavior and intended design before changing code.
+- When you review, report a finding only with a concrete, realistic failure case. State the input or state, the wrong result, and why that input or state occurs in real use. Do not report a case that needs a contract violation, a state the code prevents, or a caller that does not exist. Drop a suspicion that has no such case.
+- A structural recommendation needs no failure case. State its concrete cost. Treat it as a design decision for the user.
 - Before declaring work complete, verify the actual user-visible behavior when practical, not only an indirect proxy. State any limits that remain unverified.
 - Remove temporary files, data, and resources created for the task once the result is recorded in the required format and verified, and those items are no longer needed for delivery or verification. Preserve final deliverables and pre-existing user data. Verify cleanup before declaring the task complete.
 

@@ -49,6 +49,8 @@ Make each brief self-contained. A worker does not get your context. Each brief s
 
 Use independent review rounds until a round finds no actionable findings. An independent reviewer must not implement the work they review. In the first round, check the result against the acceptance criteria. Delegate fixes for actionable findings and the relevant checks. In each later round, check the fixes and the resulting work. Do not limit the number of rounds.
 
+An actionable finding has a concrete, realistic failure case. It states the input or state, the wrong result, and why that input or state occurs in real use. Include this rule in each reviewer brief. Tell reviewers to drop a suspicion that has no such case. A structural recommendation needs no failure case, but it must state its concrete cost. Bring structural recommendations to the user as design decisions. Do not delegate fixes for them.
+
 If a finding needs a design decision, bring it to the user. Continue to review and fix the other findings. Remain in orchestration mode.
 
 If an independent reviewer is unavailable, state that limitation. Check the work yourself and report the verification performed. Do not claim independent verification. Report completion only when the acceptance criteria pass. State any remaining limits.
