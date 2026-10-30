@@ -47,8 +47,8 @@ Make each brief self-contained. A worker does not get your context. Each brief s
 
 ## Check and stop
 
-Use up to two independent review rounds. An independent reviewer must not implement the work they review. In the first round, check the result against the acceptance criteria. Delegate fixes for actionable findings and the relevant checks. In the second round, check the fixes and the resulting work.
+Use independent review rounds until a round finds no actionable findings. An independent reviewer must not implement the work they review. In the first round, check the result against the acceptance criteria. Delegate fixes for actionable findings and the relevant checks. In each later round, check the fixes and the resulting work. Do not limit the number of rounds.
 
-If actionable findings remain after the second round, stop the affected work. Report the findings and evidence to the user. Ask whether to continue. Do not start another review or fix cycle without the user's direction. Remain in orchestration mode.
+If a finding needs a design decision, bring it to the user. Continue to review and fix the other findings. Remain in orchestration mode.
 
 If an independent reviewer is unavailable, state that limitation. Check the work yourself and report the verification performed. Do not claim independent verification. Report completion only when the acceptance criteria pass. State any remaining limits.
