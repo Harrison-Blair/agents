@@ -140,15 +140,15 @@ Should opening the second session depend on that sync finishing? This affects st
 
 ```mermaid
 flowchart LR
-    subgraph A[Open immediately]
+    subgraph A[Open now]
         direction TB
-        A1[Second session arrives] --> A2[Session opens]
-        A2 --> A3[May load older configuration]
+        A1[Session starts] --> A2[Session opens]
+        A2 --> A3[Older config]
     end
     subgraph B[Wait for sync]
         direction TB
-        B1[Second session arrives] --> B2[Wait for sync to finish]
-        B2 --> B3[Session opens after updates]
+        B1[Session starts] --> B2[Sync finishes]
+        B2 --> B3[Session opens]
     end
 ```
 
