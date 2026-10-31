@@ -12,4 +12,5 @@ The `mermaid-render` mod in [mods/mermaid-render](../../../mods/mermaid-render) 
 - The mod has room for the terminal width minus 4 columns.
 - If the art is wider than that room, the mod shows the source and a note with the two widths.
 - The mod removes `direction` lines inside subgraphs.
+- The mod uses wider spacing for diagrams with subgraphs. These diagrams are wider and taller.
 - `mermaid-ascii` does not parse the `-- label -->` edge form. Use `-->|label|`.

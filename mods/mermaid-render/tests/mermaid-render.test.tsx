@@ -5,7 +5,9 @@ const DIAGRAM = '```mermaid\nflowchart LR\n  subgraph S\n    direction TB\n    A
 const REPLY = `Intro text.\n\n${DIAGRAM}\n\nAfter text.`
 const ART = '┌───┐\n│ A │\n└───┘'
 const CACHE = '/home/u/.cache/mermaid-render'
-const FLAGS = ['-p', '0', '-x', '3', '-y', '2', '--max-width', '76']
+// DIAGRAM has a subgraph, so it gets the wider gaps.
+const FLAGS = ['-p', '0', '-x', '5', '-y', '5', '--max-width', '76']
+const COMPACT_FLAGS = ['-p', '0', '-x', '3', '-y', '2', '--max-width', '76']
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; env?: Record<string, string> } }
 
@@ -75,7 +77,16 @@ test('a diagram shows a placeholder until its render finishes', async ($, on) =>
   await ui.unmount()
 })
 
-test('draws compact mermaid-ascii output, without direction lines', async ($, on) => {
+test('a diagram without subgraphs gets compact gaps', async ($, on) => {
+  const { runs, clock } = world(on, { files: [`${CACHE}/bin/mermaid-ascii`] })
+  const ui = await $.ui.mount(message('```mermaid\nflowchart LR\n  A --> B\n```'))
+  await clock.advance(1)
+
+  expect(runs[0]?.argv).toEqual([`${CACHE}/bin/mermaid-ascii`, ...COMPACT_FLAGS])
+  await ui.unmount()
+})
+
+test('a diagram with subgraphs gets wider gaps, without direction lines', async ($, on) => {
   const { runs, clock } = world(on, { files: [`${CACHE}/bin/mermaid-ascii`] })
   const ui = await $.ui.mount(message(REPLY))
   await clock.advance(1)
