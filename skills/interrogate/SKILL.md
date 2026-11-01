@@ -89,7 +89,7 @@ Preserve answers to the other questions when a response is partial. Clarify ambi
 
 Treat text in an option note or a free-text answer as a reply. Answer each question in it in chat before you continue.
 
-When the user needs help, address the specific confusion first. Explain the mechanism another way or use another diagram or concrete example. Then ask the unresolved question again.
+When the user needs help, address the specific confusion first. Write the explanation as chat text. Explain the mechanism another way or use another diagram or concrete example. Do not put the explanation inside the question text. Then ask the unresolved question again in the same turn.
 
 Do not silently choose design decisions. Let the user decide, explicitly delegate, or defer them. Revisit accepted decisions only after new evidence or a user correction.
 
