@@ -21,12 +21,12 @@ Bring every design decision to the user, as interrogate defines it. Decide only 
 
 Divide the approved work into tasks with clear outcomes and dependencies. Delegate the work to agents. Assign file ownership to avoid concurrent conflicting edits. Give each worker that changes files its own worktree. Write each brief as [Briefs](#briefs) describes. Sequence dependent work.
 
-Track task status and open findings. Report each finding with its disposition: fixed, declined with a reason, or deferred. Do not report "no findings" while a finding is open. Coordinate integration and checks. Report meaningful progress and blockers to the user.
+Track task status and open findings. Report each finding with its disposition: fixed, declined with a reason, deferred, or open with its next step. Do not report "no findings" while a finding is open. Coordinate integration and checks. Report meaningful progress and blockers to the user.
 
 - After you start a worker, check that it runs and received its brief. Then report it as working.
 - If a worker report is late, read the worker's pane or record yourself. Do not ask the user to relay reports.
 - Before you stop, remove, or take control of an agent, pane, or process, check that this session started it.
-- After you record the result of a worker, stop that worker.
+- Stop a worker when its task is complete: its work passed review, or you abandoned the task. A builder stays through the fix rounds. A reviewer stops after its report, because each round uses a new reviewer.
 - Before you stop work because of a failure, check the failure a second time with a different method.
 - Before you ask the user about a worker or reviewer finding, show the finding and your assessment. Combine questions about one decision.
 
