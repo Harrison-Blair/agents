@@ -21,11 +21,12 @@ Bring every design decision to the user, as interrogate defines it. Decide only 
 
 Divide the approved work into tasks with clear outcomes and dependencies. Delegate the work to agents. Assign file ownership to avoid concurrent conflicting edits. Give each worker that changes files its own worktree. Write each brief as [Briefs](#briefs) describes. Sequence dependent work.
 
-Track task status and open findings. Coordinate integration and checks. Report meaningful progress and blockers to the user.
+Track task status and open findings. Report each finding with its disposition: fixed, declined with a reason, or deferred. Do not report "no findings" while a finding is open. Coordinate integration and checks. Report meaningful progress and blockers to the user.
 
 - After you start a worker, check that it runs and received its brief. Then report it as working.
 - If a worker report is late, read the worker's pane or record yourself. Do not ask the user to relay reports.
 - Before you stop, remove, or take control of an agent, pane, or process, check that this session started it.
+- After you record the result of a worker, stop that worker.
 - Before you stop work because of a failure, check the failure a second time with a different method.
 - Before you ask the user about a worker or reviewer finding, show the finding and your assessment. Combine questions about one decision.
 
@@ -45,11 +46,11 @@ After the user approves a wave of work and its workers start, begin the next rou
 
 Make each brief self-contained. A worker does not get your context. Each brief states:
 
-1. **Goal:** the outcome and its acceptance criteria.
+1. **Goal:** the outcome and its acceptance criteria. Name the full check command of the project, not only focused tests.
 2. **Scope:** what is in and out of scope, the files the worker owns, and the files not to change. The owned files include the tests and callers of the changed code.
-3. **Known facts:** the established facts that the worker would otherwise find again. For a new worktree, state the untracked setup that the work needs and the command that makes it.
-4. **Return contract:** concrete evidence such as command output, test results, and `file:line` references. Also the open findings and decisions with recommendations, and the work that remains.
-5. **Rules:** work within the brief and existing authorization. Decide only mechanical details. Return every other design decision to the orchestrator with a recommendation. Address reports to the orchestrator, not the user. When a reviewer names a defect, find and fix every other instance of that defect, and list them. In a shared checkout, do not run `git stash`, `git checkout`, `git restore`, or `git reset`.
+3. **Known facts:** the established facts that the worker would otherwise find again. If the brief cites an approved plan or decision, include it or give its path. In each follow-up brief, repeat every decision that the user made so far. Name each item that the user removed and each item to keep. For a new worktree, state the untracked setup that the work needs and the command that makes it.
+4. **Return contract:** concrete evidence such as command output, test results, and `file:line` references. Also the open findings and decisions with recommendations, and the work that remains. Also a "Not verified" list of each check that the worker could not run.
+5. **Rules:** work within the brief and existing authorization. Before you report, run every check that you can, including the full check command. Decide only mechanical details. Return every other design decision to the orchestrator with a recommendation. Address reports to the orchestrator, not the user. When a reviewer names a defect, find and fix every other instance of that defect, and list them. In a shared checkout, do not run `git stash`, `git checkout`, `git restore`, or `git reset`.
 
 ## Check and stop
 
@@ -57,8 +58,12 @@ Use independent review rounds until a round finds no actionable findings. An ind
 
 An actionable finding has a concrete, realistic failure case. It states the input or state, the wrong result, and why that input or state occurs in real use. Include this rule in each reviewer brief. Tell reviewers to drop a suspicion that has no such case. A structural recommendation needs no failure case, but it must state its concrete cost. Bring structural recommendations to the user as design decisions. Do not delegate fixes for them.
 
-If a finding needs a design decision, bring it to the user. Continue to review and fix the other findings. Remain in orchestration mode.
+A reviewer may change a scratch checkout of its own, such as a detached worktree. There it may break code on purpose to check that a test fails, and it may run live checks. This is not implementation of the reviewed work, so it does not conflict with the rule that a reviewer must not implement the work. The reviewer reverts or removes the scratch checkout. It never commits or pushes. Include this permission in each reviewer brief.
+
+If a finding needs a design decision, bring it to the user. If the same class of defect occurs in two review rounds, find a fix that removes the whole class. Bring that fix to the user as a design decision. Continue to review and fix the other findings. Remain in orchestration mode.
 
 For a task that changes only prose, check the work yourself instead of an independent review. Prose in a `SKILL.md` or `AGENTS.md` file is an instruction, so it still gets an independent review.
 
-If an independent reviewer is unavailable, state that limitation. Check the work yourself and report the verification performed. Do not claim independent verification. Report completion only when the acceptance criteria pass. State any remaining limits.
+If an independent reviewer is unavailable, state that limitation. Check the work yourself and report the verification performed. Do not claim independent verification.
+
+Report completion only when the acceptance criteria pass. State any remaining limits. Give the user each "Not verified" list from the agents, and ask the user to run those checks.
