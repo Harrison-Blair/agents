@@ -111,7 +111,13 @@ Show each settled area as a short section of the developing plan. Let the user c
 
 Finish when design decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, and remaining unknowns.
 
-Check shared understanding through the question tool when available. Revise affected sections after corrections. Identify deferred decisions that still block implementation.
+Identify deferred decisions that still block implementation. Ask the user to choose an action after the consolidated plan:
+
+- **Approve and execute:** Start the approved work when the active mode and permissions allow it. Otherwise, explain the constraint and stop.
+- **Approve and stop:** End the conversation without starting implementation.
+- **Give feedback:** Get the user's feedback. Revise the plan and present these choices again.
+
+Use the question tool when available. Use its free-text option when it provides one. Otherwise, invite a free-text response in chat. Treat free text as the user's response. Clarify the intended action if it is unclear.
 
 Invoking this skill alone authorizes a design conversation. Use existing authorization for implementation or saved artifacts. Do not create files, tickets, commits, or published content without that authorization.
 
