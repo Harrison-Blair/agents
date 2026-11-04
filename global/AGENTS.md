@@ -22,6 +22,7 @@
 - Check a fact about files, versions, or system state before you state it or ask the user for it. If you did not check it, say so.
 - When you review, report a finding only with a concrete, realistic failure case. State the input or state, the wrong result, and why that input or state occurs in real use. Do not report a case that needs a contract violation, a state the code prevents, or a caller that does not exist. Drop a suspicion that has no such case.
 - A structural recommendation needs no failure case. State its concrete cost. Treat it as a design decision for the user.
+- Report edge-case handling that has no evidence as a simplification finding. Name the code to remove.
 - Before declaring work complete, verify the actual user-visible behavior when practical, not only an indirect proxy. State any limits that remain unverified.
 - For a change to start-up, installation, launch, or visuals, run the command the user runs or inspect the rendered result. Do this before you report it as done. Name what you checked.
 - Remove temporary files, data, and resources created for the task once the result is recorded in the required format and verified, and those items are no longer needed for delivery or verification. Preserve final deliverables and pre-existing user data. Verify cleanup before declaring the task complete.
@@ -46,7 +47,10 @@ Before implementing:
 - Add no features beyond what was asked.
 - Avoid abstractions for single-use code.
 - Do not add flexibility or configurability that was not requested.
-- Do not add error handling for impossible scenarios.
+- Write code for an edge case only when you can name the input or state and say why it occurs in real use. A bug report, a log, a test, the spec, or an existing caller can give this evidence.
+- Always check data at a system boundary: user input, external APIs, and file or network I/O.
+- Do not write code for a case without evidence. List each skipped case under "Not handled" in your final report. I decide which cases are real.
+- If a precondition fails, let the code raise an error. Do not add silent fallbacks, default values, broad `except` blocks, or compatibility shims unless I ask for them.
 - If the implementation is much larger than necessary, simplify it.
 
 ## 3. Surgical Changes
