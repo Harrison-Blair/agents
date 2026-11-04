@@ -17,6 +17,8 @@ Start an unclear idea with a concrete situation or example. Establish the goal, 
 
 Match the level of detail to the current focus of the user. Ask before you examine edge cases or storage details.
 
+Ask about an edge case only when it has evidence or occurs at a system boundary. Evidence names the input or state and shows why it occurs in real use. A bug report, a log, a test, the spec, or an existing caller can give evidence. A system boundary is user input, an external API, or file or network I/O. Do not ask about a case without evidence. List it under "Not handled" in the consolidated plan. The user can move a case from that list into the plan.
+
 Propose coherent designs and explain how they work. Identify gaps, conflicts, and implicit decisions.
 
 Cover these areas when they affect the intended result:
@@ -71,11 +73,13 @@ Use Mermaid when the harness supports rendered diagrams. Format Mermaid diagrams
 
 Split a crowded diagram into smaller diagrams. Avoid decoration and repeated pictures that add no understanding. Do not force a diagram onto an abstract choice it cannot explain.
 
-## Ask in small rounds
+## Ask in rounds
 
-Ask up to three related, independent questions per round. Give every question its own decision brief. Present all briefs before opening the question tool.
+Work the decisions in rounds. The frontier is every decision with settled prerequisites. These are the questions that you can ask now without a guess about answers that the user did not give.
 
-When the user asks you to slow down, ask one question per round.
+Ask the whole frontier in one round. Put related questions together. Give every question its own decision brief and a recommended answer. Present all briefs before opening the question tool. Then wait for the answers before the next round.
+
+When the frontier has more questions than the question tool permits in one call, open the tool more than once in the same round.
 
 Ask only questions with known facts and settled prerequisite decisions. Keep dependent questions for later rounds. Adjust the remaining questions after each answer.
 
@@ -109,7 +113,7 @@ Briefly connect each new round to the relevant accepted decisions. Restore the c
 
 Show each settled area as a short section of the developing plan. Let the user correct it before building dependent decisions on it.
 
-Finish when design decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, and remaining unknowns.
+Finish when design decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, remaining unknowns, and "Not handled" edge cases.
 
 Identify deferred decisions that still block implementation. Ask the user to choose an action after the consolidated plan:
 
