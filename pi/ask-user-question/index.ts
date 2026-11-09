@@ -12,6 +12,7 @@ import {
   validate,
 } from "./logic.ts";
 import { createQuestionUI } from "./ui.ts";
+import { withHerdrBlocked } from "./herdr.ts";
 
 const NAME = "AskUserQuestion";
 
@@ -87,8 +88,10 @@ export default function (pi: ExtensionAPI) {
       const problem = validate(questions);
       if (problem) throw new Error(problem);
 
-      const state = await ctx.ui.custom<State | null>((tui, theme, _kb, done) =>
-        createQuestionUI(tui, theme, questions, done),
+      const state = await withHerdrBlocked(pi.events, () =>
+        ctx.ui.custom<State | null>((tui, theme, _kb, done) =>
+          createQuestionUI(tui, theme, questions, done),
+        ),
       );
       const { text, structured } = state
         ? formatResult(questions, state.answers)
