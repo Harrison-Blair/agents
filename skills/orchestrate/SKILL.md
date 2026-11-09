@@ -17,11 +17,15 @@ Investigate the request and the current state before asking questions. Identify 
 
 Bring every design decision to the user, as interrogate defines it. Decide only mechanical details yourself. Present a consolidated plan with testable acceptance criteria. Get the user's approval before implementation. If the user changes an approved decision, update the affected plan before dependent work continues.
 
+Include the agent workflow in the consolidated plan, as interrogate describes. Show the builders and independent reviewers, their dependencies, and parallel work. Show additional review rounds as conditional work. Do not predict how many rounds will be needed.
+
 ## Deliver
 
 Divide the approved work into tasks with clear outcomes and dependencies. Delegate the work to agents. Assign file ownership to avoid concurrent conflicting edits. Give each worker that changes files its own worktree. Write each brief as [Briefs](#briefs) describes. Sequence dependent work.
 
 Track task status and open findings. Report each finding with its disposition: fixed, declined with a reason, deferred, or open with its next step. Do not report "no findings" while a finding is open. Coordinate integration and checks. Report meaningful progress and blockers to the user.
+
+Report changes to agent roles, models, or timing as they arise. State the effective model when known. Mark an unknown model as unknown. Bring meaningful model changes to the user as design decisions.
 
 - After you start a worker, check that it runs and received its brief. Then report it as working.
 - If a worker report is late, read the worker's pane or record yourself. Do not ask the user to relay reports.

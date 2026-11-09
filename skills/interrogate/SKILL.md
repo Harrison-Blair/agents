@@ -115,6 +115,8 @@ Show each settled area as a short section of the developing plan. Let the user c
 
 Finish when design decisions have answers, explicit delegation, or explicit deferrals. End with one consolidated plan. Include the goal, chosen behavior, architecture, key implementation details, and acceptance checks where relevant. Record delegated details, assumptions, explicit deferrals, remaining unknowns, and "Not handled" edge cases.
 
+When the plan proposes agent delegation, include the agent workflow. For each agent, show its role, task, and effective model. Name the inherited model when known. Mark unknown models as unknown. Show when each agent starts, which tasks run in parallel, and which tasks depend on others. Mark conditional work and state what starts it. Bring meaningful model changes to the user as design decisions.
+
 Identify deferred decisions that still block implementation. Ask the user to choose an action after the consolidated plan:
 
 - **Approve and execute:** Start the approved work when the active mode and permissions allow it. Otherwise, explain the constraint and stop.
