@@ -20,6 +20,7 @@
 - Honor the requested phase. Investigate, plan, review, explain, or validate without implementing unless implementation is also authorized.
 - Treat suspected bugs and review findings as hypotheses. Check actual behavior and intended design before changing code.
 - Check a fact about files, versions, or system state before you state it or ask the user for it. If you did not check it, say so.
+- Your training data is older than the newest releases of external software, models, and services. Before you choose, compare, recommend, or install one, find its newest release at the upstream source. Do this also when the item is a small part of a larger task. A mirror or a repackaged copy can be old. State the version and its release date.
 - When you review, report a finding only with a concrete, realistic failure case. State the input or state, the wrong result, and why that input or state occurs in real use. Do not report a case that needs a contract violation, a state the code prevents, or a caller that does not exist. Drop a suspicion that has no such case.
 - A structural recommendation needs no failure case. State its concrete cost. Treat it as a design decision for the user.
 - Report edge-case handling that has no evidence as a simplification finding. Name the code to remove.
