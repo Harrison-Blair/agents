@@ -15,6 +15,16 @@
 - When I ask for an explanation or a clarification, or ask what something does, answer in chat. Write the full explanation as chat text before you open a question tool again. A reworded question is not an answer. Do not put the explanation inside the question text.
 - Avoid the telltale-AI contrast phrasing — "it's not X, it's Y" or "it's a X, not a Y". Say what something is plainly, without the rhetorical flip.
 
+## Time Estimates
+
+- Give an ETA before you start one operation that can take more than two minutes. An operation is a command, build, test run, download, install, or delegated agent that you wait for.
+- Before you estimate, look for facts that show the duration. Examples are the duration of a previous run, a log, a file size, and an item count.
+- Estimate the duration as a range. Give the ETA when the high end of the range is more than two minutes.
+- Get the current local time from the machine clock. Do not guess the time.
+- Show the range as a duration and as a completion time. Use a 24-hour clock and the time zone of the machine. Example: `ETA: 4m 30s to 6m. Done between 10:52 and 10:54 EST.`
+- Add the basis of the estimate in a few words. If the basis is general knowledge and you found no fact, add "not measured".
+- If you have no fact and no general knowledge for an estimate, say that the ETA is unknown. Give the reason. Do not invent a range.
+
 ## Work Boundaries and Verification
 
 - Honor the requested phase. Investigate, plan, review, explain, or validate without implementing unless implementation is also authorized.
