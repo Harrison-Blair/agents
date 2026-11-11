@@ -16,43 +16,43 @@ Claude Code does **not** discover `.agents/skills` (tracked in [issue #31005](ht
 - user scope: `~/.claude/skills/<skill-name>` → absolute canonical path;
 - project scope: `.claude/skills/<skill-name>` → absolute canonical path.
 
-Follow the canonical directory-symlink rules: absolute targets, preserve and report any conflicting destination, never copy or synchronize. Before installing, check personal, project, and plugin scopes for a duplicate frontmatter `name`; same-named skills are separate entries, and clashes get directory-qualified names.
+Follow the canonical directory-symlink rules: absolute targets, preserve and report conflicts, and never copy or synchronize. Check for duplicate names before installing. Claude resolves enterprise, personal, and project collisions by precedence. Plugin skills use a namespace. Nested and added-directory skills can use qualified names. See [name resolution](https://code.claude.com/docs/en/skills#resolve-skills-that-share-a-name).
 
 Symlink caveats:
 
-- Per-skill directory symlinks are documented and verified working on Claude Code 2.1.238; the documentation also states a target reachable from more than one location loads only once.
-- Do not symlink the `~/.claude/skills` directory itself; user reports say skills then fail to load ([#38051](https://github.com/anthropics/claude-code/issues/38051)).
-- User reports say auto-updates have removed per-skill symlinks from `~/.claude/skills` ([#50052](https://github.com/anthropics/claude-code/issues/50052)); after a Claude Code update, re-check that the links still exist (unverified here, but cheap to guard against).
+- Per-skill directory symlinks worked in Claude Code 2.1.322. The documentation says a target reachable from more than one location loads only once.
+- A project `.claude/skills` directory symlink worked in 2.1.322. The user-scope directory link was not tested. The earlier [report](https://github.com/anthropics/claude-code/issues/38051) is closed.
+- A user [reported](https://github.com/anthropics/claude-code/issues/50052) that updates removed per-skill links. This was not reproduced in the 2.1.322 evaluation. Check links after updates.
 
 ## Portable core
 
-The shared minimal frontmatter (`name`, `description`) and a standard-Markdown body with relative links are fully compatible. Claude Code silently ignores unknown frontmatter fields, so the Codex-only `agents/openai.yaml` file and any future provider sidecars are harmless.
+Claude accepts the standard frontmatter fields, including `license`, `compatibility`, and `metadata`. It accepts `compatibility` but does not act on it. The standard marks `allowed-tools` as experimental. Check its behavior in each requested harness.
 
-Keep the `description` well under Claude's 1,536-character listing cap and front-load trigger keywords: Claude loads only `name` + `description` at session start and uses them for implicit selection, truncating long descriptions when the listing budget overflows.
+Follow the Agent Skills specification's 1,024-character `description` limit. Put trigger keywords first. Claude caps the combined `description` and `when_to_use` listing text at 1,536 characters by default. Its listing budget can also omit descriptions.
 
 Exclude from the portable core every Claude-only feature, because other harnesses render it as literal text or reject it:
 
-- frontmatter extensions: `allowed-tools`, `disallowed-tools`, `disable-model-invocation`, `user-invocable`, `argument-hint`, `arguments`, `model`, `effort`, `context: fork`, `agent`, `hooks`, `paths`, `shell`, `when_to_use`;
+- provider-specific frontmatter, including `disable-model-invocation`, `user-invocable`, `argument-hint`, `arguments`, `model`, `context: fork`, `agent`, and `hooks`;
 - body substitutions: `$ARGUMENTS`, `$1`-style positional and named arguments, `${CLAUDE_SESSION_ID}`, `${CLAUDE_PROJECT_DIR}`, `${CLAUDE_SKILL_DIR}`, and other `${CLAUDE_*}` variables;
 - `` !`command` `` shell preprocessing (inline or block), which executes commands before the model reads the skill.
 
 ## Claude-only metadata
 
-Claude Code has no provider metadata sidecar equivalent to `agents/openai.yaml`; its extensions live only in `SKILL.md` frontmatter and body, which the portable core shares. Therefore a cross-harness skill must simply forgo Claude-only invocation features. Claude-specific *instructions* may live in an auxiliary file such as `references/providers/claude.md` (this file) that the body links to conditionally; other harnesses ignore unreferenced content.
+Claude Code has no provider metadata sidecar equivalent to `agents/openai.yaml`. Its skill extensions use the shared `SKILL.md`. Before adding Claude-only syntax there, explain its effect on each other requested harness and ask the user. Ask before creating a separate body too. Claude-specific instructions may live in a conditionally linked reference.
 
 ## Initialization and validation
 
-There is no bundled validator equivalent to Codex's `quick_validate.py`. Validate manually:
+Run `claude plugin validate <skills-directory>` on the directory containing the real skill folders. It does not follow symlinks. Claude Code 2.1.233 or later checks for invalid YAML frontmatter. Check these separately:
 
 - frontmatter is valid YAML with `name` matching the directory name (lowercase letters, digits, hyphens) and a concise, discriminating `description`;
 - every relative Markdown link resolves; and
 - no Claude-only syntax from the list above appears in the portable core.
 
-`/skill-doctor` and `claude plugin eval` exist as early-access tooling for skill listing cost and eval runs; use them only where enabled.
+`/skill-doctor` reports skill listing cost where available. `claude plugin eval` runs evaluations for plugin skills.
 
 ## Reload and checks
 
-Skill descriptions load at session start; Claude Code also watches existing skill directories, so edits to `SKILL.md` and a new skill added under an already-watched directory are picked up live. If the top-level skills directory did not exist when the session started, restart Claude Code. Prefer a fresh session for the acceptance checks.
+Claude Code watches existing skill directories for `SKILL.md` changes, except in bare mode. If the top-level skills directory did not exist at session start, run `/reload-skills`. Run it again after each later change in that directory. Prefer a fresh session for the acceptance checks.
 
 In a fresh Claude Code session:
 

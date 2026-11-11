@@ -11,13 +11,13 @@ Codex natively discovers:
 - administrator skills at `/etc/codex/skills`; and
 - bundled system skills.
 
-Codex follows symlinked skill directories, but the canonical user and project locations already use its native discovery layout. Do not create a redundant `$HOME/.codex/skills/<skill-name>` symlink. A second discovered copy can produce a second selector entry because skills with the same `name` are not merged.
+Codex follows symlinked skill directories. Link a source outside its discovery locations into the appropriate `.agents/skills` directory. Do not create a redundant `$HOME/.codex/skills/<skill-name>` link. A second discovered copy can produce a second selector entry because skills with the same `name` are not merged.
 
 Before installing, inspect every Codex discovery location in scope for the same frontmatter `name`, not just the folder name. Preserve conflicts and report their paths. Apply the canonical directory-symlink rules if an unusual environment requires an adapter.
 
 ## Portable core
 
-Keep canonical `SKILL.md` frontmatter limited to the shared minimum:
+Use the required `name` and `description` fields:
 
 ```yaml
 ---
@@ -26,7 +26,9 @@ description: State what the skill does and when it should apply.
 ---
 ```
 
-Use lowercase letters, digits, and hyphens for `name`, keep it under 64 characters, and match the directory name. Write the body as standard Markdown with imperative instructions and relative links to existing resources. Keep the description concise and discriminating because Codex uses it for implicit selection. Avoid Codex-only fields, commands, and invocation syntax in the portable core.
+Preserve useful optional fields from the [Agent Skills specification](https://agentskills.io/specification). Check their behavior in each requested harness. The specification marks `allowed-tools` as experimental.
+
+Use lowercase letters, digits, and hyphens for `name`. Use at most 64 characters. Match the directory name. Write the body as standard Markdown with relative links. Keep the description concise and discriminating. Avoid provider-only syntax in the portable core.
 
 ## Codex-only metadata
 
@@ -46,7 +48,7 @@ Validate the completed canonical directory with:
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" <canonical-skill-directory>
 ```
 
-The validator checks structure, frontmatter, naming, and unfinished scaffold text. Also resolve every relative Markdown link and inspect discovery locations for duplicate names; the validator does not prove either property.
+The validator checks frontmatter, naming, and unfinished scaffold text. The installed validator may reject the standard `compatibility` field. Check its allowed fields before treating that rejection as a specification error. Check relative links and duplicate names separately.
 
 ## Reload and checks
 

@@ -1,31 +1,34 @@
 ---
 name: agnostic-skill
-description: Create or maintain one portable skill for multiple agent harnesses. Keep its canonical source in .agents/skills. Use provider references for compatibility and installation. Do not use for skills intended for only one provider.
+description: Create or maintain one portable skill for multiple agent harnesses. Keep one editable source and use provider references for compatibility and installation. Do not use for skills intended for only one provider.
 ---
 
 # Agnostic Skill
 
 Maintain one editable skill source. Adapt only its discovery and provider-specific features.
 
-Load [asd-ste100](../asd-ste100/SKILL.md) before writing or editing skill instructions. Apply its Strict mode and glossary rules.
+This skill requires [asd-ste100](../asd-ste100/SKILL.md). Install it alongside this skill.
+Load it before writing or editing skill instructions. Apply its Strict mode and glossary rules.
 
 ## Canonical source
 
-- User scope: `~/.agents/skills/<skill-name>`
-- Project scope: `<repository>/.agents/skills/<skill-name>`
+- User discovery: `~/.agents/skills/<skill-name>`
+- Project discovery: `<repository>/.agents/skills/<skill-name>`
 
-Keep portable instructions in the canonical `SKILL.md`. Never maintain synchronized copies for different harnesses.
+Keep one editable source. The source may be in a discovery location or another repository directory.
+Link the source into the required discovery locations when necessary.
+Keep portable instructions in one `SKILL.md`. Never maintain synchronized copies for different harnesses.
 
 ## Workflow
 
-1. Choose user or project scope for the skill. Identify the harnesses that must discover it.
+1. Choose user or project scope for the skill. Identify the harnesses that must discover it. If the user did not identify them, ask before installing adapters.
 2. Keep the canonical frontmatter and instructions compatible with every requested harness.
 3. Read only the references for those harnesses:
    - For Codex, read [references/providers/codex.md](references/providers/codex.md).
    - For Claude Code, read [references/providers/claude.md](references/providers/claude.md).
    - For Pi, read [references/providers/pi.md](references/providers/pi.md).
    - If a provider has no reference, read its current official documentation. Add a reference under the contract below before installing an adapter.
-4. Put provider-only metadata or behavior in separate files when the harness supports that separation. Keep these details outside the portable instructions.
+4. Put provider-only metadata or behavior in separate files when the harness supports that separation. Keep these details outside the portable instructions. If a feature needs provider-only syntax in the shared `SKILL.md` or a separate body, explain the effects on each requested harness. Ask before adding it.
 5. Check the canonical skill. Install only required discovery adapters. Test each harness in a new session if its reload behavior requires one.
 
 ## Directory symlinks
