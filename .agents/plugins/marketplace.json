@@ -8,7 +8,7 @@
       "name": "hb",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "./plugins/hb"
       },
       "policy": {
         "installation": "AVAILABLE",

@@ -10,12 +10,14 @@ Never distribute the root file as global instructions.
 
 - `scripts/setup.sh` installs, synchronizes, and removes managed configuration.
   It installs the plugin `hb` for Claude Code from the clone.
-- `plugin.json` and `.claude-plugin/plugin.json` are the manifests of the plugin `hb`.
-  The plugin root is the repository root.
+- `plugins/hb/` is the plugin `hb`. This folder is the plugin root.
+  `plugins/hb/plugin.json` and `plugins/hb/.claude-plugin/plugin.json` are the manifests of the plugin.
+- Do not put a second plugin in `plugins/hb/`.
+  claude.ai skips a plugin when its folder contains the manifest of a second plugin.
 - `.claude-plugin/marketplace.json` is the Claude Code catalog.
   `.agents/plugins/marketplace.json` is the Codex catalog. The catalog name is `harrison-blair`.
-- `skills/<name>/SKILL.md` defines each portable skill.
-- `themes/` contains the Claude Code color themes of the plugin.
+- `plugins/hb/skills/<name>/SKILL.md` defines each portable skill.
+- `plugins/hb/themes/` contains the Claude Code color themes of the plugin.
 - `hooks/` contains session-start templates for Claude Code, Codex, and Cursor.
 - `pi/` contains Pi extensions.
 - `mods/<name>/` contains each Claude Code mod and its tests.
@@ -48,6 +50,7 @@ sh -n mods/mermaid-render/scripts/install-renderer.sh
 bash -n mods/mermaid-render/scripts/install-renderer.sh
 shellcheck mods/mermaid-render/scripts/install-renderer.sh
 claude plugin validate .
+claude plugin validate plugins/hb
 claude plugin validate mods/mermaid-render
 claude plugin test mods/mermaid-render
 shellcheck mods/mermaid-render/tests/smoke.sh
@@ -55,9 +58,11 @@ git diff --check
 ```
 
 The tests check behavior. The repository checker checks skills, metadata, and local Markdown links.
-It also checks the plugin manifests, the catalogs, and the reserved root names.
-`claude plugin validate .` passes with two accepted warnings: no `version` and no icon.
-Do not use `--strict` with it.
+It also checks the plugin manifests, the catalogs, and the reserved names of the plugin root.
+`claude plugin validate .` checks the catalog. It passes with one accepted warning for each plugin: no `version`.
+`claude plugin validate plugins/hb` checks the plugin `hb`.
+It passes with two accepted warnings: no `version` and no icon.
+Do not use `--strict` with these commands.
 There is no separate build command.
 
 ## Plugin Manifests and Catalogs
@@ -65,20 +70,25 @@ There is no separate build command.
 `scripts/validate_repo.py` checks these rules. `tests/test_validate_repo.py` tests them.
 
 - Change the two manifests together.
-  Each key of `plugin.json`, other than `$schema`, must be in `.claude-plugin/plugin.json` with an equal value.
+  Each key of `plugins/hb/plugin.json`, other than `$schema`, must be in `plugins/hb/.claude-plugin/plugin.json` with an equal value.
 - Only the key `dependencies` can be in the Claude Code manifest alone.
 - Do not add a `version` key to a manifest, to an entry of the Claude Code catalog, or to the manifest of such an entry.
   Each pushed commit is a release. A `version` stops updates until it changes.
 - Each entry of the Claude Code catalog needs a `source` that starts with `./` and is a directory.
   That directory must contain `.claude-plugin/plugin.json` with the same `name`.
+  It must not contain a second `.claude-plugin/plugin.json` below it.
 - Each name in `dependencies` of a manifest must be an entry name of the Claude Code catalog.
 - The Codex catalog must have the same catalog `name` as the Claude Code catalog.
   It can contain only entry names that the Claude Code catalog has.
+- A local Markdown link in a file of `plugins/hb/` must have its target in `plugins/hb/`.
+  A harness can install that folder without the other files of the repository.
 
 The harnesses load some names from the plugin root with no manifest entry. These are the reserved names:
 `agents`, `commands`, `bin`, `output-styles`, `themes`, `workflows`, `monitors`, `.mcp.json`, `mcp.json`,
 `.lsp.json`, `.app.json`, `package.json`, and `hooks/hooks.json`.
-The repository checker fails when a reserved name is at the repository root.
+The repository checker fails when a reserved name is at the top level of `plugins/hb/`.
+The repository checker permits a reserved name below `plugins/hb/skills/`.
+It does not check the reserved names at the repository root.
 To ship a reserved name on purpose, add it to `APPROVED_ROOT_NAMES` in `scripts/validate_repo.py`.
 `themes` is the only approved name. The repository checker permits the `hooks/` directory itself.
 
@@ -96,7 +106,7 @@ Use a stub `claude` command in each test of `scripts/setup.sh`.
 A test must not run the real `claude` command against the installed configuration.
 The CI job `mods` runs `scripts/setup.sh` with the real `claude` command in a temporary home directory.
 The `mermaid-render` mod installs its renderer. Do not add a download to `scripts/setup.sh`.
-Change the colors in `themes/urple.json` only together with the tests in `tests/test_theme.py`.
+Change the colors in `plugins/hb/themes/urple.json` only together with the tests in `tests/test_theme.py`.
 Those tests keep the contrast limits and the color distances of the theme.
 Preserve local skills, unrelated configuration, and other live clones' installations.
 Keep setup, sync, and uninstall behavior consistent. Check repeated runs and ownership conflicts.

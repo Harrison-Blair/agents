@@ -8,7 +8,7 @@ import re
 import unittest
 
 
-THEME = Path(__file__).resolve().parents[1] / "themes/urple.json"
+THEME = Path(__file__).resolve().parents[1] / "plugins/hb/themes/urple.json"
 # The background color of the terminal in which the user approved the colors.
 REFERENCE_BACKGROUND = "#201d2a"
 

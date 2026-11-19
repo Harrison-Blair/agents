@@ -25,8 +25,8 @@ set -u
 
 REPO_URL="https://github.com/Harrison-Blair/agents.git"
 AGENTS_SKILLS="$HOME/.agents/skills"
-# Wrappers for commands skills ship in skills/<name>/bin/, so every harness can
-# run them by the same bare name.
+# Wrappers for commands skills ship in plugins/hb/skills/<name>/bin/, so every
+# harness can run them by the same bare name.
 BIN_DIR="$HOME/.local/bin"
 WRAPPER_MARK="# agents repo command:"
 # The marker wrappers carried before the repo was renamed; still ours.
@@ -165,20 +165,38 @@ link_dir() {
 # Link every repo skill into ~/.agents/skills; prune links to removed skills.
 link_skills() {
   mkdir -p "$AGENTS_SKILLS"
-  local d name
-  for d in "$REPO"/skills/*/; do
+  local d name old_skills
+  # The skills were in skills/ of the clone before they moved to plugins/hb.
+  # A link to that folder is a link of this clone and is stale, also when a
+  # file that git does not track keeps its target. Such a link goes here,
+  # because link_dir and the prune below remove only a dangling link.
+  old_skills="$(unix_path "$REPO/skills")"
+  for d in "$AGENTS_SKILLS"/*; do
+    case "$(link_target "$d")" in
+      "$old_skills"/*) ;;
+      *) continue ;;
+    esac
+    name="$(basename "$d")"
+    unlink_dir "$d" || continue
+    if [ -d "$REPO/plugins/hb/skills/$name" ]; then
+      echo "relinked: $name"
+    else
+      echo "pruned: $name"
+    fi
+  done
+  for d in "$REPO"/plugins/hb/skills/*/; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
     link_dir "$AGENTS_SKILLS/$name" "${d%/}"
   done
   if is_windows; then
-    prune_junctions "$AGENTS_SKILLS" "$REPO/skills"
+    prune_junctions "$AGENTS_SKILLS" "$REPO/plugins/hb/skills"
     return 0
   fi
   for d in "$AGENTS_SKILLS"/*; do
     [ -L "$d" ] || continue
     case "$(readlink "$d")" in
-      "$REPO"/skills/*) [ -e "$d" ] || { rm "$d"; echo "pruned: $(basename "$d")"; } ;;
+      "$REPO"/plugins/hb/skills/*) [ -e "$d" ] || { rm "$d"; echo "pruned: $(basename "$d")"; } ;;
     esac
   done
 }
@@ -202,13 +220,15 @@ have_claude() {
 # into this clone) and each link into this clone's mods/. Links to
 # machine-local skills, links elsewhere, and real directories are not listed.
 old_claude_links() {
-  local root="$HOME/.claude/skills" repo_skills agents mods target d name
+  local root="$HOME/.claude/skills" repo_skills old_skills agents mods target d name
   if is_link "$root"; then
     target="$(resolve "$AGENTS_SKILLS")" || return 0
     [ "$(resolve "$root")" = "$target" ] && printf '%s\n' "$root"
     return 0
   fi
-  repo_skills="$(unix_path "$REPO/skills")"
+  repo_skills="$(unix_path "$REPO/plugins/hb/skills")"
+  # The place of the skills before they moved: uninstall can run before a sync.
+  old_skills="$(unix_path "$REPO/skills")"
   agents="$(unix_path "$AGENTS_SKILLS")"
   mods="$(unix_path "$REPO/mods")"
   for d in "$root"/*; do
@@ -217,7 +237,7 @@ old_claude_links() {
       "$mods"/*) ;;
       "$agents/$name")
         case "$(link_target "$AGENTS_SKILLS/$name")" in
-          "$repo_skills"/*) ;;
+          "$repo_skills"/* | "$old_skills"/*) ;;
           *) continue ;;
         esac
         ;;
@@ -336,7 +356,7 @@ link_claude_skills() {
     name="$(basename "$d")"
     target="$(link_target "$d")"
     case "$target" in
-      */skills/*) looks_like_clone "${target%/skills/*}" && continue ;;
+      */plugins/hb/skills/*) looks_like_clone "${target%/plugins/hb/skills/*}" && continue ;;
     esac
     link_dir "$root/$name" "$d"
   done
@@ -567,12 +587,13 @@ wrapper_target() {
   [ -f "$1" ] && sed -n -e "2s|^$WRAPPER_MARK ||p" -e "2s|^$OLD_WRAPPER_MARK ||p" "$1"
 }
 
-# Put a wrapper on PATH for every skills/<name>/bin/<command>. A wrapper that
-# belongs to a clone that still exists, and any file that is not a wrapper, is
-# left alone with a warning. Wrappers whose command is gone from this clone go.
+# Put a wrapper on PATH for every plugins/hb/skills/<name>/bin/<command>. A
+# wrapper that belongs to a clone that still exists, and any file that is not a
+# wrapper, is left alone with a warning. Wrappers whose command is gone from
+# this clone go.
 link_commands() {
   local target name dest current found=0
-  for target in "$REPO"/skills/*/bin/*; do
+  for target in "$REPO"/plugins/hb/skills/*/bin/*; do
     [ -f "$target" ] || continue
     found=1
     name="$(basename "$target")"
@@ -608,7 +629,7 @@ remove_commands() {
   for f in "$BIN_DIR"/*; do
     target="$(wrapper_target "$f")"
     case "$target" in
-      "$REPO"/skills/*/bin/*) ;;
+      "$REPO"/plugins/hb/skills/*/bin/*) ;;
       *) continue ;;
     esac
     [ "$1" = prune ] && [ -e "$target" ] && continue
@@ -1315,8 +1336,9 @@ remove_plugin() {
 # ~/.agents/skills entry that is itself one of those links. Real directories,
 # links pointing anywhere else, and hooks this repo did not write all stay.
 uninstall() {
-  local root="$HOME/.claude/skills" repo_skills agents pi d catalog_left=0
-  repo_skills="$(unix_path "$REPO/skills")"
+  local root="$HOME/.claude/skills" repo_skills old_skills agents pi d catalog_left=0
+  repo_skills="$(unix_path "$REPO/plugins/hb/skills")"
+  old_skills="$(unix_path "$REPO/skills")"
   agents="$(unix_path "$AGENTS_SKILLS")"
   echo "repo: $REPO"
   remove_plugin || catalog_left=1
@@ -1330,7 +1352,7 @@ uninstall() {
   fi
   for d in "$AGENTS_SKILLS"/*; do
     case "$(link_target "$d")" in
-      "$repo_skills"/*) unlink_dir "$d" && echo "removed: $d" ;;
+      "$repo_skills"/* | "$old_skills"/*) unlink_dir "$d" && echo "removed: $d" ;;
     esac
   done
   # The renderer cache is shared by every clone and every copy of the plugin,

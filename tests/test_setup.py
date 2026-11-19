@@ -106,6 +106,12 @@ case "$*" in
 esac
 """
 
+# The skills of the plugin hb in this repository.
+PLUGIN_SKILLS = (
+    "agnostic-skill", "asd-ste100", "gh-summarize-pr", "herdr-use",
+    "interrogate", "mermaid", "orchestrate", "sketchboard",
+)
+
 
 class SetupTests(unittest.TestCase):
     def setUp(self):
@@ -145,7 +151,7 @@ class SetupTests(unittest.TestCase):
         claude = bin_dir / "claude"
         claude.write_text(STUB_CLAUDE)
         claude.chmod(0o755)
-        self.skill = self.add_skill(self.repo / "skills/shared-one")
+        self.skill = self.add_skill(self.repo / "plugins/hb/skills/shared-one")
         (self.repo / "pi/agents-autopull").mkdir(parents=True)
         (self.repo / "pi/example-extension").mkdir(parents=True)
 
@@ -260,7 +266,7 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual((path / "SKILL.md").read_text(),
                                  "local contents must survive\n")
         self.assertFalse((self.shared / "claude-only").exists())
-        self.assertFalse((self.repo / "skills/claude-only").exists())
+        self.assertFalse((self.repo / "plugins/hb/skills/claude-only").exists())
 
     def test_sync_adds_shared_skills_and_prunes_only_managed_links(self):
         self.run_setup()
@@ -271,7 +277,7 @@ class SetupTests(unittest.TestCase):
         (self.shared / "unrelated-broken").symlink_to(self.base / "missing")
         local = self.add_skill(self.claude / "claude-only")
         shared_local = self.add_skill(self.shared / "machine-shared")
-        added = self.add_skill(self.repo / "skills/new-skill")
+        added = self.add_skill(self.repo / "plugins/hb/skills/new-skill")
         shutil.rmtree(self.skill)
         self.run_setup("--sync")
         self.assertFalse((self.shared / "shared-one").is_symlink())
@@ -292,7 +298,7 @@ class SetupTests(unittest.TestCase):
         # target is gone is this setup's to replace.
         other = self.add_skill(self.base / "other/skills/elsewhere")
         (self.shared / "elsewhere").symlink_to(other)
-        self.add_skill(self.repo / "skills/elsewhere")
+        self.add_skill(self.repo / "plugins/hb/skills/elsewhere")
         self.run_setup()
         moved = self.base / "moved"
         self.repo.rename(moved)
@@ -302,7 +308,7 @@ class SetupTests(unittest.TestCase):
             self.assertFalse(link.exists(), link)
         result = self.run_setup("--sync")
         self.assertEqual((self.shared / "shared-one").resolve(),
-                         (moved / "skills/shared-one").resolve())
+                         (moved / "plugins/hb/skills/shared-one").resolve())
         self.assertFalse((self.claude / "shared-one").is_symlink())
         self.assertEqual((extensions / "agents-autopull").resolve(),
                          (moved / "pi/agents-autopull").resolve())
@@ -310,6 +316,171 @@ class SetupTests(unittest.TestCase):
         self.assertIn("left untouched", result.stderr)
         self.assertEqual((self.shared / "elsewhere").readlink(), other)
         self.assertTrue((other / "SKILL.md").is_file())
+
+    def test_new_install_links_each_skill_of_the_plugin_folder(self):
+        # The fixture gets the skills of the repository itself, so the test
+        # fails when setup.sh and the repository do not agree on the folder.
+        shutil.rmtree(self.skill)
+        shutil.copytree(SOURCE / "plugins/hb/skills", self.repo / "plugins/hb/skills",
+                        dirs_exist_ok=True)
+        self.run_setup()
+        self.assertEqual(sorted(path.name for path in self.shared.iterdir()),
+                         sorted(PLUGIN_SKILLS))
+        for name in PLUGIN_SKILLS:
+            with self.subTest(name=name):
+                self.assertEqual((self.shared / name).readlink(),
+                                 self.repo.resolve() / "plugins/hb/skills" / name)
+        # Claude Code gets the skills from the plugin, so it gets no link.
+        self.assertEqual(list(self.claude.iterdir()), [])
+
+    def add_old_layout_link(self):
+        """The link setup made when the skills were in skills/ of the clone: dangling now."""
+        link = self.shared / "shared-one"
+        link.symlink_to(self.repo.resolve() / "skills/shared-one")
+        return link
+
+    def test_a_link_into_the_old_skills_folder_is_relinked(self):
+        moved = self.repo.resolve() / "plugins/hb/skills/shared-one"
+        link = self.add_old_layout_link()
+        result = self.run_setup()
+        self.assertIn("relinked: shared-one", result.stdout.splitlines())
+        self.assertEqual(link.readlink(), moved)
+        self.assertFalse((self.claude / "shared-one").is_symlink())
+        # The session-start hook runs --sync, which prints nothing.
+        link.unlink()
+        link = self.add_old_layout_link()
+        self.run_setup("--sync")
+        self.assertEqual(link.readlink(), moved)
+        self.assertFalse((self.claude / "shared-one").is_symlink())
+
+    def test_a_link_into_an_old_skills_folder_that_stays_is_relinked(self):
+        # Git removes only tracked files. An ignored file keeps the old folder
+        # after the pull that moved the skills, so the old link has a target.
+        leftover = self.repo / "skills/shared-one/scripts/__pycache__/tool.pyc"
+        leftover.parent.mkdir(parents=True)
+        leftover.write_bytes(b"")
+        moved = self.repo.resolve() / "plugins/hb/skills/shared-one"
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                link = self.add_old_layout_link()
+                result = self.run_setup(mode)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(link.readlink(), moved)
+                self.assertFalse((self.claude / "shared-one").is_symlink())
+                self.assertTrue(leftover.is_file())
+                # --sync prints nothing on stdout.
+                if mode == "setup":
+                    self.assertIn("relinked: shared-one", result.stdout.splitlines())
+                    self.assertNotIn("relinked:", self.run_setup(mode).stdout)
+                link.unlink()
+
+    def add_old_layout_home(self):
+        """Links into skills/ of the clone, the old place of the skills, and entries of other owners.
+
+        "shared-one" is a skill of the clone and "gone" is not: both links are
+        dangling. An ignored file keeps the old folder of "stays", which is
+        not a skill of the clone now.
+        """
+        old = self.repo.resolve() / "skills"
+        self.leftover = self.repo / "skills/stays/scripts/__pycache__/tool.pyc"
+        self.leftover.parent.mkdir(parents=True)
+        self.leftover.write_bytes(b"")
+        links = [self.add_old_layout_link()]
+        for name in ("gone", "stays"):
+            links.append(self.shared / name)
+            links[-1].symlink_to(old / name)
+        self.local = self.add_skill(self.shared / "machine-shared")
+        self.external = self.add_skill(self.base / "external")
+        (self.shared / "external").symlink_to(self.external)
+        # A second clone that still has the old layout.
+        self.theirs = self.add_skill(self.add_other_clone() / "skills/theirs")
+        (self.shared / "theirs").symlink_to(self.theirs)
+        return links
+
+    def assert_other_owners_are_unchanged(self):
+        self.assertTrue(self.leftover.is_file())
+        self.assertFalse(self.local.is_symlink())
+        self.assertTrue((self.local / "SKILL.md").is_file())
+        self.assertEqual((self.shared / "external").readlink(), self.external)
+        self.assertEqual((self.shared / "theirs").readlink(), self.theirs)
+        self.assertTrue((self.theirs / "SKILL.md").is_file())
+
+    def test_links_into_the_old_skills_folder_for_removed_skills_are_pruned(self):
+        skill, gone, stays = self.add_old_layout_home()
+        result = self.run_setup()
+        lines = result.stdout.splitlines()
+        self.assertIn("pruned: gone", lines)
+        self.assertIn("pruned: stays", lines)
+        self.assertEqual(result.stdout.count("pruned:"), 2, result.stdout)
+        self.assertEqual(result.stderr, "")
+        for link in (gone, stays):
+            self.assertFalse(link.is_symlink(), link)
+        self.assertEqual(skill.readlink(), self.repo.resolve() / "plugins/hb/skills/shared-one")
+        self.assert_other_owners_are_unchanged()
+        # The session-start hook runs --sync, which prints nothing on stdout.
+        for link in (gone, stays):
+            link.symlink_to(self.repo.resolve() / "skills" / link.name)
+        self.run_setup("--sync")
+        for link in (gone, stays):
+            self.assertFalse(link.is_symlink(), link)
+        self.assert_other_owners_are_unchanged()
+
+    def test_uninstall_with_no_setup_run_after_the_move_removes_the_old_links(self):
+        links = self.add_old_layout_home()
+        result = self.run_setup("--uninstall")
+        for link in links:
+            self.assertFalse(link.is_symlink(), link)
+            self.assertIn("removed: %s" % link, result.stdout.splitlines())
+        self.assert_other_owners_are_unchanged()
+
+    def test_uninstall_with_no_setup_run_after_the_move_removes_the_old_claude_links(self):
+        # The home of the setup from before the plugin: Claude Code has a link
+        # to each entry of ~/.agents/skills.
+        links = self.add_old_layout_home()
+        self.claude.mkdir()
+        for link in list(links):
+            links.append(self.claude / link.name)
+            links[-1].symlink_to(link)
+        local_link = self.claude / "machine-shared"
+        local_link.symlink_to(self.local)
+        result = self.run_setup("--uninstall")
+        for link in links:
+            self.assertFalse(link.is_symlink(), link)
+            self.assertIn("removed: %s" % link, result.stdout.splitlines())
+        self.assertEqual(local_link.readlink(), self.local)
+        self.assert_other_owners_are_unchanged()
+
+    def test_a_home_from_before_the_plugin_migrates_in_one_run_after_the_move(self):
+        moved = self.repo.resolve() / "plugins/hb/skills/shared-one"
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                link = self.add_old_layout_link()
+                skill_link, mod_link = self.add_old_links()
+                self.run_setup(mode)
+                self.assertEqual(self.claude_calls(), [self.install_call()])
+                self.assertEqual(link.readlink(), moved)
+                for old in (skill_link, mod_link):
+                    self.assertFalse(old.is_symlink(), old)
+                # A second run changes nothing.
+                state = self.home_state()
+                result = self.run_setup(mode)
+                self.assertEqual(self.home_state(), state)
+                self.assertEqual(result.stderr, "")
+                self.assertNotIn("relinked:", result.stdout)
+                self.assertNotIn("removed:", result.stdout)
+                link.unlink()
+                (self.claude_state / "calls").unlink()
+
+    def test_uninstall_removes_the_links_into_the_plugin_folder(self):
+        local = self.add_skill(self.shared / "machine-shared")
+        self.run_setup()
+        link = self.shared / "shared-one"
+        self.assertEqual(link.readlink(), self.repo.resolve() / "plugins/hb/skills/shared-one")
+        result = self.run_setup("--uninstall")
+        self.assertIn("removed: %s" % link, result.stdout.splitlines())
+        self.assertFalse(link.is_symlink())
+        self.assertTrue((self.skill / "SKILL.md").is_file())
+        self.assertTrue((local / "SKILL.md").is_file())
 
     def test_unrelated_root_symlinks_are_never_followed(self):
         for exists in (True, False):
@@ -725,7 +896,7 @@ class SetupTests(unittest.TestCase):
         # is installed, and the hook names the clone, not the directory the
         # loose copy sat in.
         self.assertEqual((self.shared / "shared-one").resolve(),
-                         (clone / "skills/shared-one").resolve())
+                         (clone / "plugins/hb/skills/shared-one").resolve())
         self.assertEqual(self.claude_calls(), [self.install_call(clone)])
         self.assertEqual(self.hook_commands(self.claude.parent / "settings.json"),
                          [self.sync_command(clone)])
@@ -736,7 +907,7 @@ class SetupTests(unittest.TestCase):
         # is a clone -- must not be mistaken for the script's own.
         clone = self.base / "clone"
         result = self.run_standalone(self.script.read_text(),
-                                     cwd=self.repo / "skills", clone=clone)
+                                     cwd=self.repo / "plugins/hb/skills", clone=clone)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("cloning", result.stdout)
         self.assertEqual(self.hook_commands(self.claude.parent / "settings.json"),
@@ -808,9 +979,9 @@ prune_junctions "$1" "$2"
         external = self.add_skill(self.base / "external")
         for name in ("shared-one", "gone", "outside", "stray"):
             (self.shared / name).mkdir()
-        result = self.run_junction_prune(self.shared, self.repo / "skills", [
+        result = self.run_junction_prune(self.shared, self.repo / "plugins/hb/skills", [
             ("shared-one", self.skill),                 # managed, target alive
-            ("gone", self.repo / "skills/gone"),        # managed, target gone
+            ("gone", self.repo / "plugins/hb/skills/gone"),        # managed, target gone
             ("outside", external),                      # not ours, alive
             ("stray", self.base / "missing"),           # not ours, broken
         ])
@@ -916,7 +1087,7 @@ link_claude_skills "$1"
     def test_setup_without_claude_says_skip_and_keeps_the_old_links(self):
         skill_link, mod_link = self.add_old_links()
         local = self.add_skill(self.shared / "machine-shared")
-        self.add_skill(self.repo / "skills/new-skill")
+        self.add_skill(self.repo / "plugins/hb/skills/new-skill")
         self.hide_claude()
         result = self.run_setup()
         skips = [line for line in result.stdout.splitlines() if "claude not on PATH" in line]
@@ -988,7 +1159,7 @@ link_claude_skills "$1"
 
     def test_a_skill_link_of_another_clone_gets_no_claude_link(self):
         # Claude Code has that skill from the plugin of the other clone.
-        other = self.add_skill(self.add_other_clone() / "skills/shared-one")
+        other = self.add_skill(self.add_other_clone() / "plugins/hb/skills/shared-one")
         (self.shared / "shared-one").symlink_to(other)
         local = self.add_skill(self.shared / "local-skill")
         self.set_catalog({"name": "harrison-blair", "source": "directory",
@@ -1000,7 +1171,7 @@ link_claude_skills "$1"
         self.assertEqual((self.shared / "shared-one").readlink(), other)
 
     def test_a_skill_that_only_another_clone_has_gets_no_claude_link(self):
-        other = self.add_skill(self.add_other_clone() / "skills/newer-only")
+        other = self.add_skill(self.add_other_clone() / "plugins/hb/skills/newer-only")
         (self.shared / "newer-only").symlink_to(other)
         self.set_catalog({"name": "harrison-blair", "source": "directory",
                           "path": str(self.base / "other-clone")})
@@ -1011,9 +1182,9 @@ link_claude_skills "$1"
                 self.assertEqual((self.shared / "newer-only").readlink(), other)
 
     def test_a_link_to_a_place_that_is_not_a_clone_gets_its_claude_link(self):
-        # The name of a skill of this clone and a skills directory do not make
-        # the target a clone.
-        notes = self.add_skill(self.base / "notes/skills/shared-one")
+        # The name of a skill of this clone and the path of the skills in a
+        # clone do not make the target a clone.
+        notes = self.add_skill(self.base / "notes/plugins/hb/skills/shared-one")
         (self.shared / "shared-one").symlink_to(notes)
         self.run_setup()
         self.assertEqual((self.claude / "shared-one").readlink(), self.shared / "shared-one")

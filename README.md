@@ -7,7 +7,7 @@ installs them for Claude Code, Codex, Cursor, and Pi on Linux, macOS, and
 Windows (Git Bash). One clone per machine is the source of truth. Machine-local
 skills can live alongside its links.
 
-The repository root is also a plugin named `hb`, in a catalog named
+The folder `plugins/hb` is a plugin named `hb`, in a catalog named
 `harrison-blair`. Claude Code gets the skills, the `mermaid-render` mod, and
 the Urple color theme from it, and a machine with no clone can install it on
 its own; see [The hb plugin](#the-hb-plugin).
@@ -17,11 +17,13 @@ its own; see [The hb plugin](#the-hb-plugin).
 ```
 AGENTS.md                contributor instructions for this repository only
 global/AGENTS.md         shared instructions, linked into ~/.agents and each harness
-plugin.json              manifest of the plugin hb
-.claude-plugin/          the same manifest for Claude Code (plugin.json) and the Claude Code catalog (marketplace.json)
+.claude-plugin/          the Claude Code catalog (marketplace.json)
 .agents/plugins/         the Codex catalog (marketplace.json)
-skills/<name>/SKILL.md   one skill per directory (see skills/agnostic-skill for conventions)
-themes/urple.json        the Claude Code color theme Urple, part of the plugin
+plugins/hb/              the plugin hb; no other plugin is in this folder
+  plugin.json            manifest of the plugin hb
+  .claude-plugin/        the same manifest for Claude Code (plugin.json)
+  skills/<name>/SKILL.md one skill per directory (see plugins/hb/skills/agnostic-skill for conventions)
+  themes/urple.json      the Claude Code color theme Urple, part of the plugin
 hooks/claude.json        SessionStart entry merged into ~/.claude/settings.json
 hooks/codex.json         SessionStart entry merged into ~/.codex/hooks.json
 hooks/cursor.json        sessionStart entry merged into ~/.cursor/hooks.json
@@ -33,18 +35,18 @@ scripts/setup.sh         one-time setup, and the --sync command the hooks run
 
 ## The hb plugin
 
-The plugin `hb` is the repository root. The catalog `harrison-blair` lists it
-for Claude Code and for Codex.
+The plugin `hb` is the folder `plugins/hb`. The catalog `harrison-blair` lists
+it for Claude Code and for Codex.
 
 | Harness | What the plugin gives |
 | --- | --- |
-| Claude Code | The 8 skills in `skills/`, the color theme [Urple](#theme), and its dependency `mermaid-render`, the mod that draws [Mermaid diagrams](#mermaid-diagrams). |
+| Claude Code | The 8 skills in `plugins/hb/skills/`, the color theme [Urple](#theme), and its dependency `mermaid-render`, the mod that draws [Mermaid diagrams](#mermaid-diagrams). |
 | Codex | The skills. Codex shows 7 of them to the model; `hb:orchestrate` is not one of them. |
 
 A skill from the plugin has the prefix `hb:`, for example `hb:interrogate`.
 Codex gives the same prefix to a skill that it reads from a link in
-`~/.agents/skills` into the clone, because the root of the clone has the
-manifest `.claude-plugin/plugin.json`: codex-cli 0.170.0 lists
+`~/.agents/skills` into the clone, because the folder `plugins/hb` of the
+clone has the manifest `.claude-plugin/plugin.json`: codex-cli 0.170.0 lists
 `hb:interrogate` there. Before the clone had that manifest, it listed
 `interrogate`. A machine-local skill in `~/.agents/skills` keeps its bare
 name. The skill names in Cursor and Pi are not measured.
@@ -148,7 +150,8 @@ Limits:
 
 ### Theme
 
-The plugin ships one Claude Code color theme, Urple, in `themes/urple.json`.
+The plugin ships one Claude Code color theme, Urple, in
+`plugins/hb/themes/urple.json`.
 Select it by hand: `/theme`, then the entry "Urple from hb". The setting value
 is `custom:hb:urple`. No script of this repository changes the `theme` setting.
 
@@ -219,8 +222,13 @@ absent:
   itself once so the rest of the run comes from the new copy rather than a
   half-read old one. A failed pull still links the current checkout and never
   fails a session.
-- Links each `skills/<name>` into `~/.agents/skills/<name>`. Codex, Cursor, and
-  Pi read that directory directly.
+- Links each `plugins/hb/skills/<name>` into `~/.agents/skills/<name>`. Codex,
+  Cursor, and Pi read that directory directly. A link that an older setup made
+  to `skills/<name>` of the clone, the place of the skills before
+  `plugins/hb`, is stale. It is replaced and reported as `relinked`, or
+  reported as `pruned` when the skill is gone. That is also done when the old
+  folder `skills/<name>` stays in the clone, because it has a file that git
+  does not track. Setup does not delete that folder.
 - Installs the plugin `hb` for Claude Code when the `claude` command is on the
   `PATH`: `claude plugin install hb --marketplace <clone>`, which needs Claude
   Code 2.1.275 or later. The one command adds the catalog `harrison-blair` from
@@ -254,8 +262,9 @@ absent:
 - Keeps `~/.claude/skills` as a real directory and links each machine-local
   skill of `~/.agents/skills` into it: a skill there that is not from this
   clone, for example `hf-cli`. The skills of this clone are not linked there,
-  because Claude Code gets them from the plugin. A link into the `skills/` of
-  another clone of this repository is not linked there either. This step needs
+  because Claude Code gets them from the plugin. A link into the
+  `plugins/hb/skills/` of another clone of this repository is not linked there
+  either. This step needs
   only the directory `~/.claude`; it does not depend on the plugin step.
   Existing local folders are preserved. Unrelated directory links are left untouched
   with a warning, except a dangling one in a skill's place, which a clone that
@@ -271,7 +280,8 @@ absent:
 - Links `global/AGENTS.md` into `~/.agents` and each harness; see
   [AGENTS.md](#agentsmd).
 - Writes a small wrapper into `~/.local/bin` for every command a skill ships in
-  `skills/<name>/bin/`, so agents in any harness run it by its bare name.
+  `plugins/hb/skills/<name>/bin/`, so agents in any harness run it by its bare
+  name.
   A file there that is not one of these wrappers, or a
   wrapper for another clone that still exists, is left alone with a warning;
   wrappers for commands removed from this clone are deleted. Setup warns when
@@ -290,9 +300,10 @@ absent:
   hand. The merge uses `python3`, `python`, or `powershell`; if none is found,
   the entry is printed for you to paste.
 - Prunes the links it made for skills that are gone: broken symlinks on
-  Linux/macOS, and on Windows junctions that point into this clone's `skills/`
-  (or, in Claude's directory, into `~/.agents/skills`) at something no longer
-  there. A junction pointing anywhere else is left alone, and removal is
+  Linux/macOS, and on Windows junctions that point into this clone's
+  `plugins/hb/skills/` (or, in Claude's directory, into `~/.agents/skills`) at
+  something no longer there. A link into this clone's old `skills/` folder is
+  pruned also when its target is there. A junction pointing anywhere else is left alone, and removal is
   `rmdir` without `/S`, which unlinks the junction and never its target.
 - Sets up the [statusline](#statusline).
 
@@ -441,7 +452,7 @@ containing `SKILL.md`.
 
 | Purpose | Location | Synced by this repo? |
 | --- | --- | --- |
-| Shared collection across machines | `skills/<name>/` in this clone | Yes, after commit and push |
+| Shared collection across machines | `plugins/hb/skills/<name>/` in this clone | Yes, after commit and push |
 | Shared across harnesses on this machine | `~/.agents/skills/<name>/` as a plain directory | No |
 | Local extras for Claude Code | `~/.claude/skills/<name>/` as a plain directory | No |
 | Local extras for Codex | `~/.codex/skills/<name>/` | No |
@@ -463,7 +474,7 @@ behavior unchanged.
 Sync only pulls repo changes; it never imports installed skills, commits, or
 pushes local edits. Editing a linked repo skill changes the file in this clone,
 so commit and push it to distribute the edit. To share a standalone local skill
-between machines, move its contents into `skills/<name>/` in the clone, remove
+between machines, move its contents into `plugins/hb/skills/<name>/` in the clone, remove
 the old local entry so setup can create its link, then commit and push.
 
 ## Adding hooks later
@@ -503,10 +514,14 @@ python3 -B -m unittest discover -s tests -v
 python3 scripts/validate_repo.py
 shellcheck scripts/setup.sh mods/mermaid-render/scripts/install-renderer.sh
 claude plugin validate .
+claude plugin validate plugins/hb
 ```
 
-`claude plugin validate .` passes with warnings about a missing `version` and a
-missing icon. Both are accepted, so do not add `--strict`.
+`claude plugin validate .` checks the catalog. It passes with one warning for
+each of the two plugins: a missing `version`. `claude plugin validate
+plugins/hb` checks the plugin `hb`. It passes with two warnings: a missing
+`version` and a missing icon. These warnings are accepted, so do not add
+`--strict`.
 
 Tests use temporary fixtures and do not change your installed skills or hooks.
 They cover setup, sync, hook merging for all three hook files, `AGENTS.md`
@@ -514,7 +529,8 @@ linking and its ownership rules, the post-pull re-exec, the sync lock,
 bootstrap, uninstall, migration, conflicts, pruning, the statusline install,
 its renderer and Codex adapter, metadata, and Markdown links. They also cover
 the Claude Code plugin step with a stub `claude` command, the plugin manifests
-and catalogs, the reserved root names, and the theme colors. In CI, the job
+and catalogs, the reserved names at the top level of the plugin folder, and the
+theme colors. In CI, the job
 `mods` runs the real `setup.sh` and `setup.sh --uninstall` with the real
 `claude` command (Claude Code 2.1.311) in a temporary home directory on Linux,
 macOS, and Windows. The Windows job

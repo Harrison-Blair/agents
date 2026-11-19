@@ -33,7 +33,7 @@ class WindowsSetupTests(unittest.TestCase):
         (self.repo / "global").mkdir()
         shutil.copy2(Path(__file__).parents[1] / "global/AGENTS.md", self.repo / "global/AGENTS.md")
         (self.repo / "AGENTS.md").write_text("Repository-only instructions must never be installed.\n")
-        self.add_skill(self.repo / "skills/shared-one")
+        self.add_skill(self.repo / "plugins/hb/skills/shared-one")
         self.env = dict(os.environ)
         # Git Bash accepts drive-letter paths with forward slashes and uses HOME
         # for the script's machine-local destinations.
@@ -116,7 +116,7 @@ class WindowsSetupTests(unittest.TestCase):
             self.assertFalse(self.is_junction(self.claude))
             link = self.shared / "shared-one"
             self.assertTrue(self.is_junction(link))
-            self.assertEqual(link.resolve(), (self.repo / "skills/shared-one").resolve())
+            self.assertEqual(link.resolve(), (self.repo / "plugins/hb/skills/shared-one").resolve())
             # Claude Code gets the skill of the clone from the plugin, and a
             # junction only for the machine-local skill.
             self.assertFalse((self.claude / "shared-one").exists())
@@ -140,7 +140,7 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertTrue((self.shared / "machine-shared/SKILL.md").is_file())
 
     def test_stale_junctions_are_pruned_and_other_junctions_survive(self):
-        doomed = self.add_skill(self.repo / "skills/doomed")
+        doomed = self.add_skill(self.repo / "plugins/hb/skills/doomed")
         doomed_local = self.add_skill(self.shared / "doomed-local")
         self.run_setup()
         self.assertTrue(self.is_junction(self.shared / "doomed"))
@@ -181,7 +181,7 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertTrue(self.is_junction(self.claude / "unrelated"))
         self.assertTrue((external / "SKILL.md").is_file())
         self.assertTrue((local / "SKILL.md").is_file())
-        self.assertTrue((self.repo / "skills/shared-one/SKILL.md").is_file())
+        self.assertTrue((self.repo / "plugins/hb/skills/shared-one/SKILL.md").is_file())
         self.assertEqual(self.claude_calls()[1:], [
             "plugin marketplace list --json",
             "plugin uninstall hb@harrison-blair --prune -y",
@@ -196,7 +196,7 @@ class WindowsSetupTests(unittest.TestCase):
         self.make_junction(unrelated, external)
         # A machine-local skill that has the name of the folder of Claude Code.
         self.add_skill(self.shared / "claude-only")
-        self.add_skill(self.repo / "skills/new-skill")
+        self.add_skill(self.repo / "plugins/hb/skills/new-skill")
         result = self.run_setup("--sync")
         self.assertIn("left untouched", result.stderr)
         self.assertTrue((local / "SKILL.md").is_file())
@@ -211,7 +211,7 @@ class WindowsSetupTests(unittest.TestCase):
         (other / "scripts").mkdir(parents=True)
         (other / "scripts/setup.sh").touch()
         (other / "hooks").mkdir()
-        skill = self.add_skill(other / "skills/newer-only")
+        skill = self.add_skill(other / "plugins/hb/skills/newer-only")
         self.add_skill(self.shared / "machine-shared")
         self.make_junction(self.shared / "newer-only", skill)
         self.run_setup()
@@ -229,7 +229,50 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertFalse(link.exists())
         self.run_setup("--sync")
         self.assertTrue(self.is_junction(link))
-        self.assertEqual(link.resolve(), (moved / "skills/shared-one").resolve())
+        self.assertEqual(link.resolve(), (moved / "plugins/hb/skills/shared-one").resolve())
+
+    def test_a_junction_into_an_old_skills_folder_that_stays_is_replaced(self):
+        # Git removes only tracked files. An ignored file keeps the old folder
+        # after the pull that moved the skills, so the old junction has a target.
+        old = self.repo / "skills/shared-one"
+        leftover = old / "scripts/__pycache__/tool.pyc"
+        leftover.parent.mkdir(parents=True)
+        leftover.write_bytes(b"")
+        self.shared.mkdir(parents=True)
+        link = self.shared / "shared-one"
+        # setup.sh wrote the physical path of the clone, which has long names.
+        self.make_junction(link, old.resolve())
+        result = self.run_setup()
+        self.assertIn("relinked: shared-one", result.stdout.splitlines())
+        self.assertNotIn("left untouched", result.stderr)
+        self.assertTrue(self.is_junction(link), self.targets(link))
+        self.assertEqual(link.resolve(), (self.repo / "plugins/hb/skills/shared-one").resolve())
+        self.assertFalse((self.claude / "shared-one").exists())
+        self.assertTrue(leftover.is_file())
+
+    def test_junctions_into_the_old_skills_folder_for_removed_skills_are_pruned(self):
+        # "gone" has no target. An ignored file keeps the old folder of "stays".
+        # No one of the two is a skill of the clone now.
+        gone = self.repo / "skills/gone"
+        gone.mkdir(parents=True)
+        leftover = self.repo / "skills/stays/scripts/__pycache__/tool.pyc"
+        leftover.parent.mkdir(parents=True)
+        leftover.write_bytes(b"")
+        external = self.add_skill(self.base / "external")
+        self.shared.mkdir(parents=True)
+        self.make_junction(self.shared / "gone", gone.resolve())
+        self.make_junction(self.shared / "stays", (self.repo / "skills/stays").resolve())
+        self.make_junction(self.shared / "unrelated", external)
+        gone.rmdir()
+        result = self.run_setup()
+        for name in ("gone", "stays"):
+            self.assertIn("pruned: %s" % name, result.stdout.splitlines())
+            self.assertFalse(self.is_junction(self.shared / name), self.targets(self.shared / name))
+            self.assertFalse((self.shared / name).exists(), name)
+        self.assertTrue(leftover.is_file())
+        self.assertTrue(self.is_junction(self.shared / "unrelated"))
+        self.assertTrue((external / "SKILL.md").is_file())
+        self.assertTrue(self.is_junction(self.shared / "shared-one"))
 
     def test_old_junctions_go_after_the_plugin_install_and_local_ones_stay(self):
         mod = self.repo / "mods/example-mod"
@@ -255,7 +298,7 @@ class WindowsSetupTests(unittest.TestCase):
             self.assertTrue(self.is_junction(self.claude / "machine-shared"))
             self.assertEqual((self.claude / "machine-shared").resolve(), local.resolve())
             self.assertTrue(self.is_junction(self.shared / "shared-one"))
-            self.assertTrue((self.repo / "skills/shared-one/SKILL.md").is_file())
+            self.assertTrue((self.repo / "plugins/hb/skills/shared-one/SKILL.md").is_file())
             self.assertTrue((mod / ".claude-plugin/plugin.json").is_file())
         # The second --sync found no old junction and ran no install.
         self.assertEqual(len(self.claude_calls()), 2)
