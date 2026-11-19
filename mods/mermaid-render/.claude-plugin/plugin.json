@@ -1,6 +1,6 @@
 {
   "name": "mermaid-render",
-  "version": "0.1.0",
   "description": "Render fenced mermaid blocks in replies as colored character art",
+  "author": { "name": "Harrison Blair" },
   "types": "./types/index.d.ts"
 }

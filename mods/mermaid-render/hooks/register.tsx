@@ -2,8 +2,9 @@ import type { Elements, EngineInterface, Register } from 'claude-code'
 
 import type { Diagram } from '../types'
 
-// scripts/setup.sh installs the mermaid-ascii binary here.
+// scripts/install-renderer.sh installs the mermaid-ascii binary here.
 const CACHE = '.cache/mermaid-render'
+const INSTALLER = 'scripts/install-renderer.sh'
 const FENCE = /^```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm
 const DIRECTION = /^[ \t]*direction[ \t]+(TB|TD|BT|LR|RL)[ \t]*$/gm
 const SUBGRAPH = /^[ \t]*subgraph\b/m
@@ -20,7 +21,6 @@ const EDGE_LABEL = /\|([^|\n]+)\|/g
 const MESSAGE = /^[ \t]*(\w+)[ \t]*[-.x)>]+[ \t]*(\w+)[ \t]*:[ \t]*(.+?)[ \t]*$/gm
 const CORNERS: Record<string, string> = { '┌': '╭', '┐': '╮', '└': '╰', '┘': '╯' }
 const ARROWHEADS = '►◄▲▼'
-const MISSING = 'mermaid-ascii not installed; run scripts/setup.sh in the agents repo'
 
 export type Part =
   | { kind: 'markdown'; text: string }
@@ -103,11 +103,43 @@ async function locate($: EngineInterface) {
   return `${home.replaceAll('\\', '/')}/${CACHE}/bin/mermaid-ascii${isWindows ? '.exe' : ''}`
 }
 
-async function renderDiagram($: EngineInterface, id: string, source: string, room: number) {
+// Module state, so each session starts the installer again. The installer
+// returns immediately when the pinned release is in place. `installing` is the
+// run in progress: diagrams that get here during a run share it. `hasRenderer`
+// is set when a diagram finds a renderer file, and stops later runs.
+let installing: Promise<string> | undefined
+let hasRenderer = false
+
+// Runs the installer with sh. On Windows, sh is on the PATH only when Git Bash
+// put it there. Resolves the reason to show when the run leaves no renderer:
+// one line of what the run wrote to stderr.
+async function install($: EngineInterface, installer: string) {
+  const result = await run($, ['sh', installer], { timeoutMs: 120_000 })
+  return reasonOf(result.stderr, 'mermaid-ascii not installed')
+}
+
+async function renderDiagram($: EngineInterface, id: string, failureId: string, source: string, room: number) {
   const ascii = await locate($)
-  if (!(await $.fs.exists(ascii))) {
-    await $.state.set({ plugin: 'mermaid-render', key: 'diagrams', id }, { status: 'error', reason: MISSING })
-    return
+  // The lookup comes before the check of hasRenderer, so no wait is between
+  // that check and the start of a run: a diagram whose lookup ends after
+  // another diagram set hasRenderer starts no second run.
+  const isPresent = hasRenderer || (await $.fs.exists(ascii))
+  if (!hasRenderer) {
+    const installer = `${$.plugin.root.replaceAll('\\', '/')}/${INSTALLER}`
+    installing ??= install($, installer).finally(() => {
+      installing = undefined
+    })
+    // A renderer that is present draws now. The run goes on in the background
+    // and its result is not shown: a new release is for later diagrams.
+    if (!isPresent) {
+      const failure = await installing
+      if (!(await $.fs.exists(ascii))) {
+        const reason = `${failure} · install with: sh "${installer}"`
+        await $.state.set({ plugin: 'mermaid-render', key: 'diagrams', id: failureId }, { status: 'error', reason })
+        return
+      }
+    }
+    hasRenderer = true
   }
   const flags = SUBGRAPH.test(source) ? SUBGRAPH_FLAGS : ASCII_FLAGS
   const result = await run($, [ascii, ...flags, '--max-width', String(room)], {
@@ -169,12 +201,17 @@ export const register: Register = on => {
         continue
       }
       const id = `${hash(part.source)}-${room}`
-      const { value } = await $.state.get({ plugin: 'mermaid-render', key: 'diagrams', id })
+      // A failed install is kept for its message only, so the same diagram in
+      // a later message starts a new install run.
+      const failureId = `${e.requestId}-${id}`
+      const value =
+        (await $.state.get({ plugin: 'mermaid-render', key: 'diagrams', id })).value ??
+        (await $.state.get({ plugin: 'mermaid-render', key: 'diagrams', id: failureId })).value
       if (!value) {
-        if (!scheduled.has(id)) {
-          scheduled.add(id)
+        if (!scheduled.has(failureId)) {
+          scheduled.add(failureId)
           $.clock.after(0, () => {
-            renderDiagram($, id, part.source, room).catch(error =>
+            renderDiagram($, id, failureId, part.source, room).catch(error =>
               $.state.set({ plugin: 'mermaid-render', key: 'diagrams', id }, { status: 'error', reason: String(error) }),
             )
           })
