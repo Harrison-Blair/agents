@@ -83,7 +83,10 @@ codex plugin marketplace add Harrison-Blair/agents && codex plugin add hb@harris
 
 Limits:
 
-- The install from GitHub is not tested before the merge that adds the plugin.
+- The install from GitHub is tested on Linux: Claude Code 2.1.328 installed
+  `hb` and `mermaid-render`, and codex-cli 0.170.0 added the catalog and
+  installed `hb`. Not tested: a session with those installs, macOS and
+  Windows, and whether a Codex install gets a later commit.
   The install from a local path is tested, with Claude Code 2.1.311 and 2.1.328
   and with codex-cli 0.170.0.
 - Codex shows 7 skills to the model, and `hb:orchestrate` is not one of them.
