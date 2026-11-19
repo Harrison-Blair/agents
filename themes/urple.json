@@ -4,6 +4,7 @@
   "overrides": {
     "claude": "#ca80ff",
     "claudeShimmer": "#ecd1ff",
+    "clawd_body": "#ca80ff",
     "text": "#efebff",
     "inactive": "#aea6c9",
     "inactiveShimmer": "#dcd2fe",
