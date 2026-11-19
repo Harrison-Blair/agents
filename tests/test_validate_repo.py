@@ -258,8 +258,17 @@ class ValidatorTests(unittest.TestCase):
         result = self.run_validator()
         self.assertNotEqual(result.returncode, 0)
         for name in RESERVED_ROOT_NAMES:
+            if name == "themes":
+                continue
             with self.subTest(name=name):
                 self.assertIn(f"  - {name}: reserved plugin name", result.stdout)
+        self.assertNotIn("themes: reserved plugin name", result.stdout)
+
+    def test_themes_directory_is_permitted(self):
+        self.write("README.md", "Text.\n")
+        self.write("themes/demo.json", "{}\n")
+        result = self.run_validator()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_approved_reserved_root_name_is_permitted(self):
         spec = importlib.util.spec_from_file_location("validate_repo", SCRIPT)
