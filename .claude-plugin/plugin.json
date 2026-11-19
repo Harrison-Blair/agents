@@ -1,0 +1,12 @@
+{
+  "name": "hb",
+  "description": "Portable skills for coding agents: planning, orchestration, clear technical writing, pull request summaries, and terminal tools.",
+  "author": {
+    "name": "Harrison Blair"
+  },
+  "repository": "https://github.com/Harrison-Blair/agents",
+  "license": "MIT",
+  "dependencies": [
+    "mermaid-render"
+  ]
+}

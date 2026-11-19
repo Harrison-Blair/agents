@@ -23,6 +23,19 @@ def _iter_tokens(tokens):
 # Installed dependencies (a skill's bundled app) are not skill content.
 SKIPPED_DIRS = {"node_modules"}
 
+PLUGIN_MANIFEST = "plugin.json"
+CLAUDE_MANIFEST = ".claude-plugin/plugin.json"
+CLAUDE_CATALOG = ".claude-plugin/marketplace.json"
+CODEX_CATALOG = ".agents/plugins/marketplace.json"
+
+# Claude Code and Codex load these names from a plugin root with no manifest entry.
+RESERVED_ROOT_NAMES = (
+    "agents", "commands", "bin", "output-styles", "themes", "workflows", "monitors",
+    ".mcp.json", "mcp.json", ".lsp.json", ".app.json", "package.json", "hooks/hooks.json",
+)
+# Reserved names that the plugin ships on purpose.
+APPROVED_ROOT_NAMES: frozenset[str] = frozenset()
+
 
 def skill_files(root: Path, pattern: str) -> list[Path]:
     return sorted(
@@ -80,6 +93,109 @@ def check_json_files(root: Path) -> list[str]:
     return errors
 
 
+def load_json_object(root: Path, relative: str, errors: list[str]) -> dict | None:
+    """Return the object in a JSON file, or add an error and return None."""
+    try:
+        data = json.loads((root / relative).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        errors.append(f"{relative}: invalid JSON: {exc}")
+        return None
+    if not isinstance(data, dict):
+        errors.append(f"{relative}: top-level JSON value must be an object")
+        return None
+    return data
+
+
+def catalog_entries(data: dict, relative: str, errors: list[str]) -> list[dict]:
+    """Return the catalog entries that are objects with a string name."""
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list):
+        errors.append(f"{relative}: 'plugins' must be an array")
+        return []
+    entries: list[dict] = []
+    for index, entry in enumerate(plugins):
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            entries.append(entry)
+        else:
+            errors.append(f"{relative}: plugins[{index}] must be an object with a string 'name'")
+    return entries
+
+
+def check_plugin_manifests(root: Path) -> list[str]:
+    """Check that the two plugin manifests of the repository root agree."""
+    errors: list[str] = []
+    shared = load_json_object(root, PLUGIN_MANIFEST, errors)
+    claude = load_json_object(root, CLAUDE_MANIFEST, errors)
+    if shared is None or claude is None:
+        return errors
+    # Each pushed commit is a release. A version stops updates until it changes.
+    for relative, manifest in ((PLUGIN_MANIFEST, shared), (CLAUDE_MANIFEST, claude)):
+        if "version" in manifest:
+            errors.append(f"{relative}: key 'version' is not permitted")
+    shared_keys = shared.keys() - {"$schema"}
+    for key in sorted(shared_keys):
+        if key not in claude:
+            errors.append(f"{CLAUDE_MANIFEST}: missing key {key!r} of {PLUGIN_MANIFEST}")
+        elif claude[key] != shared[key]:
+            errors.append(f"{CLAUDE_MANIFEST}: {key!r} is not equal in {PLUGIN_MANIFEST}")
+    # Only Claude Code reads "dependencies".
+    for key in sorted(claude.keys() - shared_keys - {"dependencies"}):
+        errors.append(f"{CLAUDE_MANIFEST}: key {key!r} is not in {PLUGIN_MANIFEST}")
+    return errors
+
+
+def check_plugin_catalogs(root: Path) -> list[str]:
+    """Check the Claude Code catalog entries, and the Codex catalog against them."""
+    errors: list[str] = []
+    claude = load_json_object(root, CLAUDE_CATALOG, errors)
+    codex = load_json_object(root, CODEX_CATALOG, errors)
+    if claude is None:
+        return errors
+    entries = catalog_entries(claude, CLAUDE_CATALOG, errors)
+    claude_names = {entry["name"] for entry in entries}
+    for entry in entries:
+        name = entry["name"]
+        # Claude Code uses the version of an entry before the commit SHA.
+        if "version" in entry:
+            errors.append(f"{CLAUDE_CATALOG}: plugin {name!r}: key 'version' is not permitted")
+        source = entry.get("source")
+        if not isinstance(source, str) or not source.startswith("./"):
+            errors.append(f"{CLAUDE_CATALOG}: plugin {name!r}: 'source' must start with './'")
+            continue
+        if not (root / source).is_dir():
+            errors.append(f"{CLAUDE_CATALOG}: plugin {name!r}: no source directory {source!r}")
+            continue
+        manifest_path = (Path(source) / CLAUDE_MANIFEST).as_posix()
+        manifest = load_json_object(root, manifest_path, errors)
+        if manifest is None:
+            continue
+        if manifest.get("name") != name:
+            errors.append(f"{manifest_path}: 'name' must be {name!r}, as in its catalog entry")
+        # Claude Code does not load a plugin when one of its dependencies is absent.
+        for dependency in manifest.get("dependencies", []):
+            if dependency not in claude_names:
+                errors.append(
+                    f"{manifest_path}: dependency {dependency!r} is not in {CLAUDE_CATALOG}"
+                )
+    if codex is None:
+        return errors
+    if codex.get("name") != claude.get("name"):
+        errors.append(f"{CODEX_CATALOG}: 'name' is not equal to 'name' in {CLAUDE_CATALOG}")
+    for entry in catalog_entries(codex, CODEX_CATALOG, errors):
+        if entry["name"] not in claude_names:
+            errors.append(f"{CODEX_CATALOG}: plugin {entry['name']!r} is not in {CLAUDE_CATALOG}")
+    return errors
+
+
+def check_reserved_names(root: Path) -> list[str]:
+    """Return an error for each unapproved name that the harnesses load from the root."""
+    return [
+        f"{name}: reserved plugin name at the repository root; approve it in APPROVED_ROOT_NAMES"
+        for name in RESERVED_ROOT_NAMES
+        if name not in APPROVED_ROOT_NAMES and (root / name).exists()
+    ]
+
+
 def check_yaml_files(root: Path) -> list[str]:
     errors: list[str] = []
     paths = skill_files(root, "*.yaml")
@@ -121,7 +237,10 @@ def check_skills(root: Path) -> list[str]:
 
 
 def collect_errors(root: Path) -> list[str]:
-    checks = (check_skills, check_json_files, check_yaml_files, check_markdown_links)
+    checks = (
+        check_skills, check_json_files, check_yaml_files, check_markdown_links,
+        check_plugin_manifests, check_plugin_catalogs, check_reserved_names,
+    )
     errors: list[str] = []
     for check in checks:
         errors.extend(check(root))

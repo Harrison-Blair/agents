@@ -107,6 +107,8 @@ jobs:
             claude plugin validate "$mod"
             claude plugin test "$mod"
           done
+      - name: Validate the root plugin
+        run: claude plugin validate .
 
   mermaid-smoke:
     name: Mermaid renderer smoke test (${{ matrix.os }})

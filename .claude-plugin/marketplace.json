@@ -1,0 +1,19 @@
+{
+  "name": "harrison-blair",
+  "description": "Harrison Blair's plugins for coding agents.",
+  "owner": {
+    "name": "Harrison Blair"
+  },
+  "plugins": [
+    {
+      "name": "hb",
+      "source": "./",
+      "description": "Portable skills for coding agents."
+    },
+    {
+      "name": "mermaid-render",
+      "source": "./mods/mermaid-render",
+      "description": "Render fenced mermaid blocks in replies as colored character art."
+    }
+  ]
+}
