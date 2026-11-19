@@ -7,20 +7,160 @@ installs them for Claude Code, Codex, Cursor, and Pi on Linux, macOS, and
 Windows (Git Bash). One clone per machine is the source of truth. Machine-local
 skills can live alongside its links.
 
+The repository root is also a plugin named `hb`, in a catalog named
+`harrison-blair`. Claude Code gets the skills, the `mermaid-render` mod, and
+the Urple color theme from it, and a machine with no clone can install it on
+its own; see [The hb plugin](#the-hb-plugin).
+
 ## Layout
 
 ```
 AGENTS.md                contributor instructions for this repository only
 global/AGENTS.md         shared instructions, linked into ~/.agents and each harness
+plugin.json              manifest of the plugin hb
+.claude-plugin/          the same manifest for Claude Code (plugin.json) and the Claude Code catalog (marketplace.json)
+.agents/plugins/         the Codex catalog (marketplace.json)
 skills/<name>/SKILL.md   one skill per directory (see skills/agnostic-skill for conventions)
+themes/urple.json        the Claude Code color theme Urple, part of the plugin
 hooks/claude.json        SessionStart entry merged into ~/.claude/settings.json
 hooks/codex.json         SessionStart entry merged into ~/.codex/hooks.json
 hooks/cursor.json        sessionStart entry merged into ~/.cursor/hooks.json
 pi/<name>/               Pi extensions (agents-autopull, ask-user-question, statusline), linked into ~/.pi/agent/extensions
-mods/<name>/             Claude Code mods (mermaid-render), linked into ~/.claude/skills
+mods/<name>/             Claude Code mods (mermaid-render), each one a plugin in the Claude Code catalog
 statusline/              statusline renderer and its shared config.json
 scripts/setup.sh         one-time setup, and the --sync command the hooks run
 ```
+
+## The hb plugin
+
+The plugin `hb` is the repository root. The catalog `harrison-blair` lists it
+for Claude Code and for Codex.
+
+| Harness | What the plugin gives |
+| --- | --- |
+| Claude Code | The 8 skills in `skills/`, the color theme [Urple](#theme), and its dependency `mermaid-render`, the mod that draws [Mermaid diagrams](#mermaid-diagrams). |
+| Codex | The skills. Codex shows 7 of them to the model; `hb:orchestrate` is not one of them. |
+
+A skill from the plugin has the prefix `hb:`, for example `hb:interrogate`.
+A skill that a harness reads from a link in `~/.agents/skills` keeps its bare
+name.
+
+On a machine with a clone, `scripts/setup.sh` installs the plugin for Claude
+Code from the clone; see [Setup and updating](#setup-and-updating). Codex,
+Cursor, and Pi read the skill links in `~/.agents/skills` there, and setup does
+not install the Codex plugin.
+
+On a machine with no clone, install the plugin from GitHub. That gives the
+skills and, in Claude Code, the mod and the theme. The global instructions, the
+hooks, the statusline, and the Pi extensions need a clone and setup.
+
+Claude Code 2.1.275 or later, from a shell:
+
+```sh
+claude plugin install hb --marketplace Harrison-Blair/agents
+```
+
+Or in a session:
+
+```
+/plugin install hb --marketplace Harrison-Blair/agents
+```
+
+The one command adds the catalog and installs `hb` and its dependency
+`mermaid-render`.
+
+Codex:
+
+```sh
+codex plugin marketplace add Harrison-Blair/agents && codex plugin add hb@harrison-blair
+```
+
+Limits:
+
+- The install from GitHub is not tested before the merge that adds the plugin.
+  The install from a local path is tested, with Claude Code 2.1.311 and 2.1.328
+  and with codex-cli 0.170.0.
+- Codex shows 7 skills to the model, and `hb:orchestrate` is not one of them.
+- Claude Code loads a plugin in place when its catalog is a local path, so a
+  pull of the clone updates the plugin. Codex copies the plugin to its cache.
+- The manifests and the catalog entries have no `version`, so each pushed
+  commit is a release.
+
+### Mermaid diagrams
+
+The `mermaid-render` mod draws the fenced `mermaid` blocks of a reply with
+`mermaid-ascii`, and it is the only installer of that renderer.
+`scripts/setup.sh` downloads nothing.
+
+- While a session has found no renderer, each diagram looks for the renderer
+  and starts the installer, `sh <plugin root>/scripts/install-renderer.sh`, with
+  a limit of 120 seconds. Diagrams that get there during a run share that run.
+- With a renderer present, the diagram draws at once. The installer runs in the
+  background, one time in each session, and its result is not shown. When it
+  installs a new release, later diagrams draw with the new release, and a
+  diagram that is already drawn stays as it is. A failed background run changes
+  nothing.
+- With no renderer present, the diagram shows a placeholder and waits for the
+  installer. If no renderer is there after the run, the diagram shows its source
+  and a note with the reason and the manual command. The next diagram, and the
+  same diagram in a later message, start a new run.
+- The release is pinned in `mods/mermaid-render/scripts/install-renderer.sh`
+  (`VERSION`, now 1.6.2). A machine that has an older release moves to a new
+  pin in the background of the first diagram of a session; diagrams from the
+  next one draw with the new release.
+- The cache is `~/.cache/mermaid-render`: `bin/mermaid-ascii` (`.exe` on
+  Windows), `.mermaid-ascii-version`, and the marker `.agents-managed`. A cache
+  directory without the marker is not changed.
+- The download is checked against the checksum file of the release, and a
+  mismatch installs nothing. Each download has a connection limit of 10
+  seconds.
+- To install by hand: `sh mods/mermaid-render/scripts/install-renderer.sh`.
+  Exit status 0 means that the pinned release is installed. Each other result
+  is exit status 1 with one reason line on stderr; for a `curl` error, the line
+  has the first line of the `curl` text.
+- The installer needs `sh`, `curl`, `tar`, and `sha256sum` or `shasum`. On
+  Windows it needs Git Bash with `cygpath`, and `powershell`.
+
+Limits:
+
+- On Windows, the automatic install needs `sh` on the `PATH` (Git Bash).
+  Otherwise the note gives the manual command.
+- On Windows, if a diagram is drawn at the moment when the background run
+  replaces `mermaid-ascii.exe`, the replacement fails and the next session
+  tries again.
+- When `sh` is bash and `LC_ALL` names a locale that the machine does not have,
+  the note for a failed install can show the locale warning of the shell as its
+  reason. The manual command in the note gives the real reason.
+- When the cache is removed while the mod stays installed (see
+  [Uninstalling](#uninstalling)), the mod installs the renderer again at the
+  first diagram of the next session. A session that has already drawn a diagram
+  starts no installer run; its new diagrams show their source and a note until
+  the session ends.
+
+### Theme
+
+The plugin ships one Claude Code color theme, Urple, in `themes/urple.json`.
+Select it by hand: `/theme`, then the entry "Urple from hb". The setting value
+is `custom:hb:urple`. No script of this repository changes the `theme` setting.
+
+- It is one dark theme: the base `dark-daltonized` with 29 color overrides.
+  There is no light variant, and Codex does not use it.
+- Its purpose is high contrast for low vision, and status colors that stay
+  distinct for protanopia, deuteranopia, and tritanopia.
+- The contrast values hold for the terminal background `#201d2a` (WCAG 2
+  contrast ratio): `text` and `inactive` at least 7:1; accent, status, and
+  border colors at least 4.5:1; `subtle` at least 3:1; `text` on the message
+  and selection backgrounds at least 7:1.
+- `claude`, `success`, `error`, and `warning` are at least 0.15 apart in OKLab
+  for normal vision and for each simulated deficiency (Machado, Oliveira,
+  Fernandes 2009, severity 1.0).
+- `tests/test_theme.py` keeps these properties: a color change that breaks a
+  limit fails the test.
+- A plugin theme is read-only for the user. According to the Claude Code
+  documentation, an edit in `/theme` saves a copy in the user's own themes
+  directory; this is not tested here.
+- Claude Code 2.1.328 showed the default accent color in the first frames of a
+  session, before the theme colors.
 
 ## Setup and updating
 
@@ -47,9 +187,14 @@ needed.
 
 That run installs one session-start hook per harness (Pi gets an extension
 instead), and the hook runs `scripts/setup.sh --sync` from this clone at each
-session start. Sync does everything setup does, so later changes -- new skills,
-an edited `global/AGENTS.md` or hook template -- arrive on their own; setup is only
-needed again after moving or re-cloning the repo. To sync by hand:
+session start. Sync does everything setup does, except that it installs the
+Claude Code plugin only while a link of an older setup remains (see below). So
+later changes -- new skills, an edited `global/AGENTS.md` or hook template --
+arrive on their own; setup is needed again after moving or re-cloning the repo,
+and when the plugin step of the last setup was skipped or failed. After you
+move the clone, run
+`scripts/setup.sh` from the new path: it also replaces the Claude Code catalog
+that still names the old path. To sync by hand:
 
 ```sh
 ~/source/agents/scripts/setup.sh --sync
@@ -64,25 +209,53 @@ absent:
   fails a session.
 - Links each `skills/<name>` into `~/.agents/skills/<name>`. Codex, Cursor, and
   Pi read that directory directly.
-- Keeps `~/.claude/skills` as a real directory and links each shared skill into
-  it from `~/.agents/skills`, including machine-local shared skills. Existing
-  local folders are preserved. An older whole-directory link to
-  `~/.agents/skills` is automatically replaced with individual links without
-  changing the shared contents. Unrelated directory links are left untouched
+- Installs the plugin `hb` for Claude Code when the `claude` command is on the
+  `PATH`: `claude plugin install hb --marketplace <clone>`, which needs Claude
+  Code 2.1.275 or later. The one command adds the catalog `harrison-blair` from
+  the clone and installs `hb` and its dependency `mermaid-render`. Claude Code
+  loads both in place from the clone, so a pull is enough to update them.
+  - Setup runs the command at each run. Sync runs it only while a link that an
+    older setup made remains in `~/.claude/skills`; with none left, sync does
+    not start `claude`.
+  - After a successful install, the links that an older setup made are removed
+    and reported as `removed`: each link in `~/.claude/skills` to a skill of
+    this clone, and the `mermaid-render` mod link. An older whole-directory
+    link from `~/.claude/skills` to `~/.agents/skills` is replaced with a real
+    directory that holds only the machine-local links, without changing the
+    shared contents.
+  - Without `claude` on the `PATH`, the step prints one `skip:` line and the
+    old links stay.
+  - When the install fails, setup warns with the reason that `claude` gave and
+    the old links stay, so Claude Code loses no skill. While old links remain,
+    each sync tries the install again and prints the warning again.
+  - On a machine that has no old link, sync does not install the plugin. Run
+    `scripts/setup.sh` again when `claude` is on the `PATH`, or after you
+    correct the cause of a failed install. Until then Claude Code has no skill,
+    mod, or theme of this repository.
+  - Claude Code refuses a catalog named `harrison-blair` that it already has
+    from a different source: a second clone that still exists, or GitHub. Setup
+    then warns and changes nothing. To use this clone in its place, run
+    `claude plugin marketplace remove harrison-blair`, then run setup. That
+    command also uninstalls the two plugins and deletes their saved data.
+  - A catalog whose directory is gone, because the clone moved or was deleted,
+    is removed and added again from this clone.
+- Keeps `~/.claude/skills` as a real directory and links each machine-local
+  skill of `~/.agents/skills` into it: a skill there that is not from this
+  clone, for example `hf-cli`. The skills of this clone are not linked there,
+  because Claude Code gets them from the plugin. A link into the `skills/` of
+  another clone of this repository is not linked there either. This step needs
+  only the directory `~/.claude`; it does not depend on the plugin step.
+  Existing local folders are preserved. Unrelated directory links are left untouched
   with a warning, except a dangling one in a skill's place, which a clone that
   moved or was deleted left behind: that is replaced and reported as `relinked`.
+  An older whole-directory link to `~/.agents/skills` already shows each
+  machine-local skill, and it stays until the plugin is installed.
 - Links each Pi extension in `pi/` into `~/.pi/agent/extensions/<name>`, and
   prunes a link there that points into this clone's `pi/` at something gone,
   such as an extension that was renamed.
-- Links each Claude Code mod in `mods/` into `~/.claude/skills/<name>`, where
-  Claude Code loads it as a plugin, and prunes a link there that points into
-  this clone's `mods/` at something gone. Nothing is linked when `~/.claude`
-  does not exist.
-- Setup only, never `--sync`: installs the renderer the `mermaid-render` mod
-  runs into `~/.cache/mermaid-render`. That is the `mermaid-ascii` binary,
-  checked against its release checksum. A repeat run downloads nothing when
-  the pinned version is in place. An existing `~/.cache/mermaid-render`
-  that setup did not create is left alone with a warning.
+- Links no Claude Code mod and downloads no renderer. The `mermaid-render` mod
+  comes with the plugin and installs its renderer itself; see
+  [Mermaid diagrams](#mermaid-diagrams).
 - Links `global/AGENTS.md` into `~/.agents` and each harness; see
   [AGENTS.md](#agentsmd).
 - Writes a small wrapper into `~/.local/bin` for every command a skill ships in
@@ -216,10 +389,13 @@ Codex's `[tui].status_line` is always managed.
 ```
 
 This reverses what setup installed for that clone and prints each removal: the
+Claude Code plugin `hb` and the catalog `harrison-blair` when the catalog
+points at that clone, the
 skill links in `~/.agents/skills` that point into it, the links in
-`~/.claude/skills` that point at those, every Pi extension link into its `pi/`,
-every mod link into its `mods/`, the `~/.cache/mermaid-render` renderers when
-setup created them and no other clone's `mermaid-render` link remains,
+`~/.claude/skills` that an older setup made to those skills and to the
+`mermaid-render` mod, every Pi extension link into its `pi/`,
+the `~/.cache/mermaid-render` renderer cache when it has the marker and nothing
+uses it any more,
 the `AGENTS.md` links and managed copies (the harness files only while
 `~/.agents/AGENTS.md` is this clone's), the command wrappers in `~/.local/bin`
 that run its skills' commands, the hook entries running that clone's `--sync`,
@@ -228,6 +404,23 @@ Codex's `[tui].status_line` is kept. It never removes a real directory, a
 link pointing anywhere else, a hook this repo did not write, or an entry for a
 different clone -- including a dead one, which belongs to whoever owns it. The
 clone itself stays; delete it afterwards if you want it gone.
+
+For the plugin, uninstall runs `claude plugin uninstall hb@harrison-blair
+--prune -y`, which also removes the dependency `mermaid-render`, and then
+`claude plugin marketplace remove harrison-blair`. A catalog `harrison-blair`
+from a different source is not from that clone: it stays with its plugins and
+is reported as `kept`. Without `claude` on the `PATH`, uninstall prints one
+`skip:` line and the plugin stays; run the two commands later to remove it.
+When uninstall cannot read the catalogs of Claude Code, for example because
+Python does not start, it warns and keeps the plugin, the catalog, and the
+renderer cache.
+
+The renderer cache stays while something can still use it: an entry
+`~/.claude/skills/mermaid-render`, which is the link of another clone, or a
+catalog `harrison-blair` that Claude Code still lists after the plugin step.
+Without `claude` on the `PATH`, only the first of these is checked. If the mod
+is still installed after the cache is removed, it installs the renderer again;
+see [Mermaid diagrams](#mermaid-diagrams).
 
 ## Machine-local skills
 
@@ -247,7 +440,8 @@ Setup and sync preserve ordinary local folders and unrelated links. If a shared
 skill's name conflicts with an existing local entry, they warn and skip that
 link; they do not overwrite the local entry. Use distinct names to keep both.
 Shared machine-local skills added to `~/.agents/skills` become linked into
-Claude's directory on the next setup or sync.
+Claude's directory on the next setup or sync. The skills of this repository are
+not linked there: Claude Code gets them from the plugin, with the prefix `hb:`.
 
 These locations separate storage, not visibility: [Cursor reads
 `~/.agents/skills` and also discovers Claude and Codex
@@ -295,14 +489,23 @@ Install the CI-only parsers and reference validator, then run the checks locally
 python3 -m pip install -r requirements-ci.txt
 python3 -B -m unittest discover -s tests -v
 python3 scripts/validate_repo.py
-shellcheck scripts/setup.sh
+shellcheck scripts/setup.sh mods/mermaid-render/scripts/install-renderer.sh
+claude plugin validate .
 ```
+
+`claude plugin validate .` passes with warnings about a missing `version` and a
+missing icon. Both are accepted, so do not add `--strict`.
 
 Tests use temporary fixtures and do not change your installed skills or hooks.
 They cover setup, sync, hook merging for all three hook files, `AGENTS.md`
 linking and its ownership rules, the post-pull re-exec, the sync lock,
 bootstrap, uninstall, migration, conflicts, pruning, the statusline install,
-its renderer and Codex adapter, metadata, and Markdown links. The Windows job
+its renderer and Codex adapter, metadata, and Markdown links. They also cover
+the Claude Code plugin step with a stub `claude` command, the plugin manifests
+and catalogs, the reserved root names, and the theme colors. In CI, the job
+`mods` runs the real `setup.sh` and `setup.sh --uninstall` with the real
+`claude` command (Claude Code 2.1.311) in a temporary home directory on Linux,
+macOS, and Windows. The Windows job
 runs the junction, `AGENTS.md` symlink and copy, and PowerShell merge tests
 with Git for Windows Bash; native Windows testing is required before a junction
 or symlink change -- pruning included -- is considered verified.
