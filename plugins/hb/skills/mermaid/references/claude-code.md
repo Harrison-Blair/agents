@@ -1,6 +1,6 @@
 # Claude Code: mermaid-render
 
-The `mermaid-render` mod in [mods/mermaid-render](../../../mods/mermaid-render) draws each `mermaid` fenced code block in a reply. These notes describe how it draws them.
+The `mermaid-render` mod draws each `mermaid` fenced code block in a reply. These notes describe how it draws them.
 
 ## Renderer
 

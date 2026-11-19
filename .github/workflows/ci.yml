@@ -115,8 +115,10 @@ jobs:
             claude plugin validate "$mod"
             claude plugin test "$mod"
           done
-      - name: Validate the root plugin
-        run: claude plugin validate .
+      - name: Validate the catalog and the plugin hb
+        run: |
+          claude plugin validate .
+          claude plugin validate plugins/hb
       # The real setup.sh with the real claude command, in a new home directory.
       # The uninstall part checks that setup.sh finds its own catalog, which on
       # Windows has a path form that only the real command gives.

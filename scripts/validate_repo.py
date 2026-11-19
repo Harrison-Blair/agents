@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import unquote, urlsplit
@@ -23,8 +24,11 @@ def _iter_tokens(tokens):
 # Installed dependencies (a skill's bundled app) are not skill content.
 SKIPPED_DIRS = {"node_modules"}
 
-PLUGIN_MANIFEST = "plugin.json"
-CLAUDE_MANIFEST = ".claude-plugin/plugin.json"
+# The folder of the plugin hb. It is the plugin root for both harnesses.
+PLUGIN_ROOT = "plugins/hb"
+MANIFEST_NAME = ".claude-plugin/plugin.json"
+PLUGIN_MANIFEST = f"{PLUGIN_ROOT}/plugin.json"
+CLAUDE_MANIFEST = f"{PLUGIN_ROOT}/{MANIFEST_NAME}"
 CLAUDE_CATALOG = ".claude-plugin/marketplace.json"
 CODEX_CATALOG = ".agents/plugins/marketplace.json"
 
@@ -39,15 +43,23 @@ APPROVED_ROOT_NAMES: frozenset[str] = frozenset({"themes"})
 
 def skill_files(root: Path, pattern: str) -> list[Path]:
     return sorted(
-        path for path in (root / "skills").rglob(pattern)
+        path for path in (root / PLUGIN_ROOT / "skills").rglob(pattern)
         if not SKIPPED_DIRS.intersection(path.relative_to(root).parts)
     )
 
 
 def check_markdown_links(root: Path) -> list[str]:
-    """Return errors for local links/images whose destinations do not exist."""
+    """Return errors for local links/images whose destinations do not exist.
+
+    A link in a file of the plugin must also stay inside the plugin folder,
+    because a harness can install that folder without the rest of the repository.
+    """
     errors: list[str] = []
-    markdown_files = [root / "README.md", *skill_files(root, "*.md")]
+    plugin_root = root / PLUGIN_ROOT
+    markdown_files = [root / "README.md", *sorted(
+        path for path in plugin_root.rglob("*.md")
+        if not SKIPPED_DIRS.intersection(path.relative_to(root).parts)
+    )]
     parser = MarkdownIt()
     for markdown_file in markdown_files:
         if not markdown_file.is_file():
@@ -74,8 +86,13 @@ def check_markdown_links(root: Path) -> list[str]:
             if parsed.path.startswith("/"):
                 continue
             target = markdown_file.parent / unquote(parsed.path)
-            if not target.exists():
-                relative = markdown_file.relative_to(root)
+            relative = markdown_file.relative_to(root)
+            if (markdown_file.is_relative_to(plugin_root)
+                    and not Path(os.path.normpath(target)).is_relative_to(plugin_root)):
+                errors.append(
+                    f"{relative}: local target {destination!r} is outside {PLUGIN_ROOT}"
+                )
+            elif not target.exists():
                 errors.append(f"{relative}: missing local target {destination!r}")
     return errors
 
@@ -122,7 +139,7 @@ def catalog_entries(data: dict, relative: str, errors: list[str]) -> list[dict]:
 
 
 def check_plugin_manifests(root: Path) -> list[str]:
-    """Check that the two plugin manifests of the repository root agree."""
+    """Check that the two plugin manifests of the plugin folder agree."""
     errors: list[str] = []
     shared = load_json_object(root, PLUGIN_MANIFEST, errors)
     claude = load_json_object(root, CLAUDE_MANIFEST, errors)
@@ -165,13 +182,21 @@ def check_plugin_catalogs(root: Path) -> list[str]:
         if not (root / source).is_dir():
             errors.append(f"{CLAUDE_CATALOG}: plugin {name!r}: no source directory {source!r}")
             continue
-        manifest_path = (Path(source) / CLAUDE_MANIFEST).as_posix()
+        manifest_path = (Path(source) / MANIFEST_NAME).as_posix()
+        # claude.ai skips a plugin whose folder contains the manifest of a second plugin.
+        for nested in sorted((root / source).rglob(MANIFEST_NAME)):
+            nested_path = nested.relative_to(root).as_posix()
+            if nested_path != manifest_path:
+                errors.append(
+                    f"{CLAUDE_CATALOG}: plugin {name!r}: source {source!r} contains "
+                    f"a second manifest {nested_path!r}"
+                )
         manifest = load_json_object(root, manifest_path, errors)
         if manifest is None:
             continue
         if manifest.get("name") != name:
             errors.append(f"{manifest_path}: 'name' must be {name!r}, as in its catalog entry")
-        # check_plugin_manifests reports a version in the root manifest.
+        # check_plugin_manifests reports a version in the manifest of the plugin folder.
         if "version" in manifest and manifest_path != CLAUDE_MANIFEST:
             errors.append(f"{manifest_path}: key 'version' is not permitted")
         # Claude Code does not load a plugin when one of its dependencies is absent.
@@ -191,11 +216,12 @@ def check_plugin_catalogs(root: Path) -> list[str]:
 
 
 def check_reserved_names(root: Path) -> list[str]:
-    """Return an error for each unapproved name that the harnesses load from the root."""
+    """Return an error for each unapproved name that the harnesses load from the plugin root."""
     return [
-        f"{name}: reserved plugin name at the repository root; approve it in APPROVED_ROOT_NAMES"
+        f"{PLUGIN_ROOT}/{name}: reserved plugin name at the plugin root; "
+        "approve it in APPROVED_ROOT_NAMES"
         for name in RESERVED_ROOT_NAMES
-        if name not in APPROVED_ROOT_NAMES and (root / name).exists()
+        if name not in APPROVED_ROOT_NAMES and (root / PLUGIN_ROOT / name).exists()
     ]
 
 
@@ -217,16 +243,16 @@ def check_yaml_files(root: Path) -> list[str]:
 
 
 def check_skills(root: Path) -> list[str]:
-    """Validate every immediate skills/<name> directory with skills-ref."""
+    """Validate every immediate plugins/hb/skills/<name> directory with skills-ref."""
     try:
         from skills_ref.validator import validate
     except ImportError as exc:  # pragma: no cover - exercised by CI setup
         return [f"skills-ref is required: {exc}"]
 
     errors: list[str] = []
-    skills_root = root / "skills"
+    skills_root = root / PLUGIN_ROOT / "skills"
     if not skills_root.is_dir():
-        return ["skills: directory does not exist"]
+        return [f"{PLUGIN_ROOT}/skills: directory does not exist"]
     for path in sorted(skills_root.iterdir()):
         if not path.is_dir():
             errors.append(f"{path.relative_to(root)}: skill entry must be a directory")

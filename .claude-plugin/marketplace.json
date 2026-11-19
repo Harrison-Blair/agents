@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "hb",
-      "source": "./",
+      "source": "./plugins/hb",
       "description": "Portable skills for coding agents."
     },
     {
