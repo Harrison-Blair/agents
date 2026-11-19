@@ -97,6 +97,13 @@ class WindowsSetupTests(unittest.TestCase):
                 child.unlink()
         path.rmdir()
 
+    def targets(self, *links):
+        """For a failure message: each junction with the target that it records."""
+        return "; ".join(
+            "%s -> %s" % (link, os.readlink(link) if self.is_junction(link) else "(no junction)")
+            for link in links
+        )
+
     def claude_calls(self):
         """The arguments of each call of the claude stand-in, one line per call."""
         return (self.claude_state / "calls").read_text(encoding="utf-8").splitlines()
@@ -234,11 +241,16 @@ class WindowsSetupTests(unittest.TestCase):
         skill_link = self.claude / "shared-one"
         mod_link = self.claude / "example-mod"
         self.make_junction(skill_link, self.shared / "shared-one")
-        self.make_junction(mod_link, mod)
+        # setup.sh wrote the physical path of the clone, which has long names.
+        # The temporary directory of the test can have a short name in it.
+        self.make_junction(mod_link, mod.resolve())
         for _ in range(2):
             self.run_setup("--sync")
             for link in (skill_link, mod_link):
-                self.assertFalse(self.is_junction(link), link)
+                # setup.sh takes a junction for its own by the spelling of the
+                # target, so a failure shows it beside one that setup.sh wrote.
+                self.assertFalse(self.is_junction(link),
+                                 self.targets(link, self.shared / "shared-one"))
                 self.assertFalse(link.exists(), link)
             self.assertTrue(self.is_junction(self.claude / "machine-shared"))
             self.assertEqual((self.claude / "machine-shared").resolve(), local.resolve())
@@ -247,9 +259,9 @@ class WindowsSetupTests(unittest.TestCase):
             self.assertTrue((mod / ".claude-plugin/plugin.json").is_file())
         # The second --sync found no old junction and ran no install.
         self.assertEqual(len(self.claude_calls()), 2)
-        self.make_junction(mod_link, mod)
-        self.run_setup("--uninstall")
-        self.assertFalse(self.is_junction(mod_link))
+        self.make_junction(mod_link, mod.resolve())
+        result = self.run_setup("--uninstall")
+        self.assertFalse(self.is_junction(mod_link), self.targets(mod_link) + "\n" + result.stdout)
         self.assertFalse(mod_link.exists())
         self.assertTrue((mod / ".claude-plugin/plugin.json").is_file())
 
