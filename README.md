@@ -152,7 +152,7 @@ The plugin ships one Claude Code color theme, Urple, in `themes/urple.json`.
 Select it by hand: `/theme`, then the entry "Urple from hb". The setting value
 is `custom:hb:urple`. No script of this repository changes the `theme` setting.
 
-- It is one dark theme: the base `dark-daltonized` with 29 color overrides.
+- It is one dark theme: the base `dark-daltonized` with 30 color overrides.
   There is no light variant, and Codex does not use it.
 - Its purpose is high contrast for low vision, and status colors that stay
   distinct for protanopia, deuteranopia, and tritanopia.
@@ -168,10 +168,9 @@ is `custom:hb:urple`. No script of this repository changes the `theme` setting.
 - A plugin theme is read-only for the user. According to the Claude Code
   documentation, an edit in `/theme` saves a copy in the user's own themes
   directory; this is not tested here.
-- The theme does not change the logo of the welcome header, because Urple has
-  no override for the color token of the logo, `clawd_body`. Claude Code
-  2.1.328 showed the logo in the default color (RGB 215, 119, 87) for the full
-  session, also after a redraw.
+- The logo of the welcome header has the accent color, from the override
+  `clawd_body`. Claude Code 2.1.328 showed the logo in RGB 202, 128, 255, also
+  after a redraw.
 - Claude Code 2.1.328 drew the first frame of a session with its default
   colors. The theme colors came with the next frame, about 0.1 seconds later.
 

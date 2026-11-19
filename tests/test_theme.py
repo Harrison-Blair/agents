@@ -105,7 +105,8 @@ class UrpleThemeTests(unittest.TestCase):
     def test_contrast_on_the_reference_background(self):
         limits = {
             "text": 7.0, "inactive": 7.0,
-            "claude": 4.5, "suggestion": 4.5, "permission": 4.5, "remember": 4.5,
+            "claude": 4.5, "clawd_body": 4.5, "suggestion": 4.5,
+            "permission": 4.5, "remember": 4.5,
             "success": 4.5, "error": 4.5, "warning": 4.5, "planMode": 4.5,
             "autoAccept": 4.5, "bashBorder": 4.5, "promptBorder": 4.5,
             "subtle": 3.0,
