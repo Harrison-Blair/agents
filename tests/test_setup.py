@@ -1501,7 +1501,7 @@ printf '%s\n' "$*" >> "$AGENTS_TEST_HOME/npm-log"
 
 INSTALLER = SOURCE / "mods/mermaid-render/scripts/install-renderer.sh"
 # The mermaid-ascii release the installer pins.
-PIN = "1.6.1"
+PIN = "1.6.2"
 
 
 class ModTests(unittest.TestCase):

@@ -10,8 +10,8 @@ const DIRECTION = /^[ \t]*direction[ \t]+(TB|TD|BT|LR|RL)[ \t]*$/gm
 const SUBGRAPH = /^[ \t]*subgraph\b/m
 // Compact spacing: no padding rows inside boxes, short gaps between them.
 const ASCII_FLAGS = ['-p', '0', '-x', '3', '-y', '2']
-// mermaid-ascii 1.6.1 draws a second subgraph through its nodes with gaps
-// below 5, so diagrams with subgraphs get wider gaps.
+// mermaid-ascii 1.6.1 and 1.6.2 draw a second subgraph through its nodes with
+// gaps below 5, so diagrams with subgraphs get wider gaps.
 const SUBGRAPH_FLAGS = ['-p', '0', '-x', '5', '-y', '5']
 // A node's label, quoted or not: A[text], A(text) or A{text}.
 const LABEL = /(\w)([[({])(?![[({])"?([^"\n\])}]*?)"?([\])}])/g
