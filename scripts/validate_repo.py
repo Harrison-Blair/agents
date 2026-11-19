@@ -34,7 +34,7 @@ RESERVED_ROOT_NAMES = (
     ".mcp.json", "mcp.json", ".lsp.json", ".app.json", "package.json", "hooks/hooks.json",
 )
 # Reserved names that the plugin ships on purpose.
-APPROVED_ROOT_NAMES: frozenset[str] = frozenset()
+APPROVED_ROOT_NAMES: frozenset[str] = frozenset({"themes"})
 
 
 def skill_files(root: Path, pattern: str) -> list[Path]:
