@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import unittest
 
+from test_setup import STUB_CLAUDE
+
 
 @unittest.skipUnless(os.name == "nt", "native junction tests run on Windows CI")
 class WindowsSetupTests(unittest.TestCase):
@@ -37,6 +39,14 @@ class WindowsSetupTests(unittest.TestCase):
         # for the script's machine-local destinations.
         self.env["HOME"] = self.home.as_posix()
         self.env["USERPROFILE"] = self.home.as_posix()
+        # The claude command is a stand-in: the real one would change the
+        # plugins of the person who runs the tests.
+        bin_dir = self.base / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "claude").write_text(STUB_CLAUDE, encoding="utf-8", newline="\n")
+        self.claude_state = self.base / "claude-stub"
+        self.env["CLAUDE_STUB"] = self.claude_state.as_posix()
+        self.env["PATH"] = str(bin_dir) + os.pathsep + self.env["PATH"]
         self.bash = shutil.which("bash")
         if not self.bash:
             raise AssertionError("Git for Windows Bash is required for native junction tests")
@@ -87,14 +97,27 @@ class WindowsSetupTests(unittest.TestCase):
                 child.unlink()
         path.rmdir()
 
+    def claude_calls(self):
+        """The arguments of each call of the claude stand-in, one line per call."""
+        return (self.claude_state / "calls").read_text(encoding="utf-8").splitlines()
+
     def test_fresh_and_repeated_setup_create_real_root_and_junctions(self):
+        local = self.add_skill(self.shared / "machine-shared")
         for _ in range(2):
             self.run_setup()
             self.assertTrue(self.claude.is_dir())
             self.assertFalse(self.is_junction(self.claude))
-            link = self.claude / "shared-one"
+            link = self.shared / "shared-one"
             self.assertTrue(self.is_junction(link))
             self.assertEqual(link.resolve(), (self.repo / "skills/shared-one").resolve())
+            # Claude Code gets the skill of the clone from the plugin, and a
+            # junction only for the machine-local skill.
+            self.assertFalse((self.claude / "shared-one").exists())
+            self.assertTrue(self.is_junction(self.claude / "machine-shared"))
+            self.assertEqual((self.claude / "machine-shared").resolve(), local.resolve())
+        self.assertEqual(len(self.claude_calls()), 2)
+        self.assertTrue(all(call.startswith("plugin install hb --marketplace ")
+                            for call in self.claude_calls()))
 
     def test_legacy_junction_migration_preserves_targets(self):
         self.run_setup()
@@ -106,33 +129,38 @@ class WindowsSetupTests(unittest.TestCase):
         migrated = self.claude / "machine-shared"
         self.assertTrue(self.is_junction(migrated))
         self.assertEqual(migrated.resolve(), (self.shared / "machine-shared").resolve())
+        self.assertFalse((self.claude / "shared-one").exists())
         self.assertTrue((self.shared / "machine-shared/SKILL.md").is_file())
 
     def test_stale_junctions_are_pruned_and_other_junctions_survive(self):
         doomed = self.add_skill(self.repo / "skills/doomed")
+        doomed_local = self.add_skill(self.shared / "doomed-local")
         self.run_setup()
         self.assertTrue(self.is_junction(self.shared / "doomed"))
-        self.assertTrue(self.is_junction(self.claude / "doomed"))
+        self.assertTrue(self.is_junction(self.claude / "doomed-local"))
         external = self.add_skill(self.base / "external")
         self.make_junction(self.shared / "unrelated", external)
         local = self.add_skill(self.shared / "machine-shared")
         shutil.rmtree(doomed)
+        shutil.rmtree(doomed_local)
         result = self.run_setup("--sync")
         self.assertFalse(self.is_junction(self.shared / "doomed"))
         self.assertFalse((self.shared / "doomed").exists())
-        self.assertFalse(self.is_junction(self.claude / "doomed"))
-        self.assertFalse((self.claude / "doomed").exists())
+        self.assertFalse(self.is_junction(self.claude / "doomed-local"))
+        self.assertFalse((self.claude / "doomed-local").exists())
         # A junction out of this setup's reach, and the real directories on the
         # far side of every junction, are untouched.
         self.assertTrue(self.is_junction(self.shared / "unrelated"))
         self.assertEqual((self.shared / "unrelated").resolve(), external.resolve())
         self.assertTrue((external / "SKILL.md").is_file())
         self.assertTrue((local / "SKILL.md").is_file())
-        self.assertTrue(self.is_junction(self.claude / "shared-one"))
+        self.assertTrue(self.is_junction(self.shared / "shared-one"))
         self.assertEqual(result.returncode, 0)
 
     def test_uninstall_removes_junctions_and_leaves_real_directories(self):
         self.run_setup()
+        # A junction of an older setup that no install has removed.
+        self.make_junction(self.claude / "shared-one", self.shared / "shared-one")
         external = self.add_skill(self.base / "external")
         self.make_junction(self.claude / "unrelated", external)
         local = self.add_skill(self.claude / "claude-only")
@@ -147,6 +175,11 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertTrue((external / "SKILL.md").is_file())
         self.assertTrue((local / "SKILL.md").is_file())
         self.assertTrue((self.repo / "skills/shared-one/SKILL.md").is_file())
+        self.assertEqual(self.claude_calls()[1:], [
+            "plugin marketplace list --json",
+            "plugin uninstall hb@harrison-blair --prune -y",
+            "plugin marketplace remove harrison-blair",
+        ])
 
     def test_local_folders_conflicts_and_unrelated_junctions_survive(self):
         self.run_setup()
@@ -154,14 +187,30 @@ class WindowsSetupTests(unittest.TestCase):
         external = self.add_skill(self.base / "external")
         unrelated = self.claude / "unrelated"
         self.make_junction(unrelated, external)
-        self.add_skill(self.repo / "skills/claude-only")
+        # A machine-local skill that has the name of the folder of Claude Code.
+        self.add_skill(self.shared / "claude-only")
         self.add_skill(self.repo / "skills/new-skill")
         result = self.run_setup("--sync")
         self.assertIn("left untouched", result.stderr)
         self.assertTrue((local / "SKILL.md").is_file())
+        self.assertFalse(self.is_junction(local))
         self.assertTrue(self.is_junction(unrelated))
         self.assertEqual(unrelated.resolve(), external.resolve())
-        self.assertTrue(self.is_junction(self.claude / "new-skill"))
+        self.assertTrue(self.is_junction(self.shared / "new-skill"))
+        self.assertFalse((self.claude / "new-skill").exists())
+
+    def test_a_junction_into_another_clone_gets_no_claude_junction(self):
+        other = self.base / "other-clone"
+        (other / "scripts").mkdir(parents=True)
+        (other / "scripts/setup.sh").touch()
+        (other / "hooks").mkdir()
+        skill = self.add_skill(other / "skills/newer-only")
+        self.add_skill(self.shared / "machine-shared")
+        self.make_junction(self.shared / "newer-only", skill)
+        self.run_setup()
+        self.assertFalse((self.claude / "newer-only").exists())
+        self.assertTrue(self.is_junction(self.claude / "machine-shared"))
+        self.assertTrue(self.is_junction(self.shared / "newer-only"))
 
     def test_sync_from_moved_clone_replaces_dangling_junctions(self):
         self.run_setup()
@@ -174,29 +223,34 @@ class WindowsSetupTests(unittest.TestCase):
         self.run_setup("--sync")
         self.assertTrue(self.is_junction(link))
         self.assertEqual(link.resolve(), (moved / "skills/shared-one").resolve())
-        claude_link = self.claude / "shared-one"
-        self.assertTrue(self.is_junction(claude_link))
-        self.assertEqual(claude_link.resolve(), (moved / "skills/shared-one").resolve())
 
-    def test_mods_are_junctioned_pruned_and_uninstalled(self):
-        # Not named mermaid-render: that one would download the real renderers.
+    def test_old_junctions_go_after_the_plugin_install_and_local_ones_stay(self):
         mod = self.repo / "mods/example-mod"
         (mod / ".claude-plugin").mkdir(parents=True)
         (mod / ".claude-plugin/plugin.json").write_text('{"name": "example-mod"}\n')
-        doomed = self.repo / "mods/doomed-mod"
-        doomed.mkdir()
+        local = self.add_skill(self.shared / "machine-shared")
         self.run_setup()
-        link = self.claude / "example-mod"
-        self.assertTrue(self.is_junction(link))
-        self.assertEqual(link.resolve(), mod.resolve())
-        self.assertTrue(self.is_junction(self.claude / "doomed-mod"))
-        doomed.rmdir()
-        self.run_setup("--sync")
-        self.assertFalse(self.is_junction(self.claude / "doomed-mod"))
-        self.assertFalse((self.claude / "doomed-mod").exists())
+        # The junctions that setup made before Claude Code got the plugin.
+        skill_link = self.claude / "shared-one"
+        mod_link = self.claude / "example-mod"
+        self.make_junction(skill_link, self.shared / "shared-one")
+        self.make_junction(mod_link, mod)
+        for _ in range(2):
+            self.run_setup("--sync")
+            for link in (skill_link, mod_link):
+                self.assertFalse(self.is_junction(link), link)
+                self.assertFalse(link.exists(), link)
+            self.assertTrue(self.is_junction(self.claude / "machine-shared"))
+            self.assertEqual((self.claude / "machine-shared").resolve(), local.resolve())
+            self.assertTrue(self.is_junction(self.shared / "shared-one"))
+            self.assertTrue((self.repo / "skills/shared-one/SKILL.md").is_file())
+            self.assertTrue((mod / ".claude-plugin/plugin.json").is_file())
+        # The second --sync found no old junction and ran no install.
+        self.assertEqual(len(self.claude_calls()), 2)
+        self.make_junction(mod_link, mod)
         self.run_setup("--uninstall")
-        self.assertFalse(self.is_junction(link))
-        self.assertFalse(link.exists())
+        self.assertFalse(self.is_junction(mod_link))
+        self.assertFalse(mod_link.exists())
         self.assertTrue((mod / ".claude-plugin/plugin.json").is_file())
 
     def agents_paths(self):

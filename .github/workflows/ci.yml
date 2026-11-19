@@ -56,7 +56,10 @@ jobs:
       - name: Run Pi extension tests
         run: node --test tests/test_ask_user_question.ts tests/test_pi_statusline.ts
       - name: Check shell syntax
-        run: bash -n scripts/setup.sh && sh -n scripts/setup.sh
+        run: |
+          bash -n scripts/setup.sh && sh -n scripts/setup.sh
+          bash -n mods/mermaid-render/scripts/install-renderer.sh
+          sh -n mods/mermaid-render/scripts/install-renderer.sh
       - name: Check whitespace
         run: git diff-tree --check --no-commit-id -r HEAD
       - name: Install ShellCheck (Linux)
@@ -94,6 +97,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # setup.sh reads the Claude Code catalogs and merges the hooks with Python.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -109,6 +117,25 @@ jobs:
           done
       - name: Validate the root plugin
         run: claude plugin validate .
+      # The real setup.sh with the real claude command, in a new home directory.
+      # The uninstall part checks that setup.sh finds its own catalog, which on
+      # Windows has a path form that only the real command gives.
+      - name: Install and uninstall the plugin with setup.sh
+        run: |
+          home="$(mktemp -d)"
+          if command -v cygpath >/dev/null 2>&1; then home="$(cygpath -m "$home")"; fi
+          export HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude"
+          mkdir "$CLAUDE_CONFIG_DIR"
+          bash scripts/setup.sh
+          plugins="$(claude plugin list --json)"
+          printf '%s\n' "$plugins"
+          printf '%s\n' "$plugins" | grep -F '"id": "hb@harrison-blair"'
+          printf '%s\n' "$plugins" | grep -F '"id": "mermaid-render@harrison-blair"'
+          bash scripts/setup.sh --uninstall
+          left="$(claude plugin list --json)"
+          catalogs="$(claude plugin marketplace list --json)"
+          printf '%s\n' "$left" "$catalogs"
+          case "$left $catalogs" in *harrison-blair*) exit 1 ;; esac
 
   mermaid-smoke:
     name: Mermaid renderer smoke test (${{ matrix.os }})

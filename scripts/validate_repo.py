@@ -171,6 +171,9 @@ def check_plugin_catalogs(root: Path) -> list[str]:
             continue
         if manifest.get("name") != name:
             errors.append(f"{manifest_path}: 'name' must be {name!r}, as in its catalog entry")
+        # check_plugin_manifests reports a version in the root manifest.
+        if "version" in manifest and manifest_path != CLAUDE_MANIFEST:
+            errors.append(f"{manifest_path}: key 'version' is not permitted")
         # Claude Code does not load a plugin when one of its dependencies is absent.
         for dependency in manifest.get("dependencies", []):
             if dependency not in claude_names:
