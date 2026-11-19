@@ -42,13 +42,19 @@ for Claude Code and for Codex.
 | Codex | The skills. Codex shows 7 of them to the model; `hb:orchestrate` is not one of them. |
 
 A skill from the plugin has the prefix `hb:`, for example `hb:interrogate`.
-A skill that a harness reads from a link in `~/.agents/skills` keeps its bare
-name.
+Codex gives the same prefix to a skill that it reads from a link in
+`~/.agents/skills` into the clone, because the root of the clone has the
+manifest `.claude-plugin/plugin.json`: codex-cli 0.170.0 lists
+`hb:interrogate` there. Before the clone had that manifest, it listed
+`interrogate`. A machine-local skill in `~/.agents/skills` keeps its bare
+name. The skill names in Cursor and Pi are not measured.
 
 On a machine with a clone, `scripts/setup.sh` installs the plugin for Claude
 Code from the clone; see [Setup and updating](#setup-and-updating). Codex,
 Cursor, and Pi read the skill links in `~/.agents/skills` there, and setup does
-not install the Codex plugin.
+not install the Codex plugin. Codex shows the same 7 skills from the links. If
+the Codex plugin is also installed on such a machine, codex-cli 0.170.0 lists
+each of the 7 skills two times, with the same name.
 
 On a machine with no clone, install the plugin from GitHub. That gives the
 skills and, in Claude Code, the mod and the theme. The global instructions, the
@@ -159,8 +165,12 @@ is `custom:hb:urple`. No script of this repository changes the `theme` setting.
 - A plugin theme is read-only for the user. According to the Claude Code
   documentation, an edit in `/theme` saves a copy in the user's own themes
   directory; this is not tested here.
-- Claude Code 2.1.328 showed the default accent color in the first frames of a
-  session, before the theme colors.
+- The theme does not change the logo of the welcome header, because Urple has
+  no override for the color token of the logo, `clawd_body`. Claude Code
+  2.1.328 showed the logo in the default color (RGB 215, 119, 87) for the full
+  session, also after a redraw.
+- Claude Code 2.1.328 drew the first frame of a session with its default
+  colors. The theme colors came with the next frame, about 0.1 seconds later.
 
 ## Setup and updating
 
