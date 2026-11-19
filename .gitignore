@@ -7,3 +7,6 @@ __pycache__/
 
 # Local Python environment for the checks
 .venv/
+
+# Results of local test runs
+test-results/
