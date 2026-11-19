@@ -64,7 +64,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - name: Run ShellCheck (Linux)
         if: runner.os == 'Linux'
-        run: shellcheck scripts/setup.sh mods/*/tests/*.sh
+        run: shellcheck scripts/setup.sh mods/*/scripts/*.sh mods/*/tests/*.sh
 
   windows:
     name: Native Windows junction tests
@@ -124,12 +124,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: '3.13'
-      # Setup links the mod and installs its renderer only where Claude Code is.
-      - name: Run setup
-        run: mkdir -p ~/.claude && bash scripts/setup.sh
+      # The mod runs this script, with sh, at the first diagram of a session.
+      - name: Install the renderer
+        run: sh mods/mermaid-render/scripts/install-renderer.sh
       - name: Render with mermaid-ascii
         run: bash mods/mermaid-render/tests/smoke.sh

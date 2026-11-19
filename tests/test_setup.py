@@ -1476,18 +1476,36 @@ link_agents_md
 # Offline stand-ins for the renderer download. curl serves files from a fixture
 # directory and logs each URL; npm logs any call, which setup must not make.
 STUB_CURL = r"""#!/bin/sh
-out="$3"; url="$4"
+out="$5"; url="$6"
+printf '%s\n' "$1 $2 $3 $4" >> "$AGENTS_TEST_HOME/curl-options"
 printf '%s\n' "$url" >> "$AGENTS_TEST_HOME/curl-log"
 cp "$AGENTS_CURL_FIXTURE/${url##*/}" "$out"
+"""
+
+# What curl prints when it cannot verify the certificate of the server.
+STUB_CURL_TLS_ERROR = r"""#!/bin/sh
+cat >&2 <<'EOF'
+curl: (60) SSL certificate problem: self-signed certificate
+More details here: https://curl.se/docs/sslcerts.html
+
+curl failed to verify the legitimacy of the server and therefore could not
+establish a secure connection to it. To learn more about this situation and
+how to fix it, please visit the webpage mentioned above.
+EOF
+exit 60
 """
 
 STUB_NPM = r"""#!/bin/sh
 printf '%s\n' "$*" >> "$AGENTS_TEST_HOME/npm-log"
 """
 
+INSTALLER = SOURCE / "mods/mermaid-render/scripts/install-renderer.sh"
+# The mermaid-ascii release the installer pins.
+PIN = "1.6.1"
+
 
 class ModTests(unittest.TestCase):
-    """Mods under mods/ and the renderer the mermaid-render mod needs."""
+    """Mods under mods/ and the renderer the mermaid-render mod installs."""
 
     # The SetupTests fixture, without running its tests a second time.
     run_setup = SetupTests.run_setup
@@ -1511,7 +1529,7 @@ class ModTests(unittest.TestCase):
                                 "mermaid-ascii"], check=True)
                 digest = hashlib.sha256((fixture / asset).read_bytes()).hexdigest()
                 lines.append("%s  %s\n" % (digest, asset))
-        self.checksums = fixture / "mermaid-ascii_1.6.1_checksums.txt"
+        self.checksums = fixture / ("mermaid-ascii_%s_checksums.txt" % PIN)
         self.checksums.write_text("".join(lines))
         self.env["AGENTS_CURL_FIXTURE"] = str(fixture)
         bin_dir = self.base / "bin"
@@ -1523,17 +1541,29 @@ class ModTests(unittest.TestCase):
         path = self.home / name
         return path.read_text().splitlines() if path.exists() else []
 
-    def test_setup_links_mods_and_installs_mermaid_ascii_once(self):
-        result = self.run_setup()
-        self.assertEqual((self.claude / "mermaid-render").resolve(), self.mod.resolve())
-        self.assertEqual((self.cache / "bin/mermaid-ascii").read_text(), "#!/bin/sh\necho art\n")
-        self.assertIn("installed: mermaid-ascii 1.6.1", result.stdout)
-        self.assertFalse((self.cache / "download").exists())
-        # A repeat finds the version in place and downloads nothing.
-        downloads = len(self.log("curl-log"))
-        self.assertEqual(downloads, 2)
+    def run_installer(self):
+        """Run the mod's installer the way register.tsx runs it."""
+        return subprocess.run(
+            ["sh", str(INSTALLER)], env=dict(self.env, HOME=str(self.home)),
+            text=True, capture_output=True,
+        )
+
+    def install(self):
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def assert_refused(self, result, reason):
+        """Exit status 1, and one stderr line that has the reason."""
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn(reason, result.stderr)
+
+    def test_setup_links_mods_and_downloads_nothing(self):
         self.run_setup()
-        self.assertEqual(len(self.log("curl-log")), downloads)
+        self.assertEqual((self.claude / "mermaid-render").resolve(), self.mod.resolve())
+        self.assertFalse(self.cache.exists())
+        self.assertEqual(self.log("curl-log"), [])
 
     def test_setup_installs_no_image_renderer(self):
         result = self.run_setup()
@@ -1547,25 +1577,66 @@ class ModTests(unittest.TestCase):
         self.assertFalse(self.cache.exists())
         self.assertEqual(self.log("curl-log"), [])
 
+    def test_installer_installs_mermaid_ascii_once(self):
+        result = self.install()
+        self.assertEqual((self.cache / "bin/mermaid-ascii").read_text(), "#!/bin/sh\necho art\n")
+        self.assertEqual((self.cache / ".mermaid-ascii-version").read_text(), PIN + "\n")
+        self.assertTrue((self.cache / ".agents-managed").exists())
+        self.assertIn("installed: mermaid-ascii " + PIN, result.stdout)
+        self.assertFalse((self.cache / "download").exists())
+        # A repeat finds the version in place and downloads nothing.
+        downloads = len(self.log("curl-log"))
+        self.assertEqual(downloads, 2)
+        self.install()
+        self.assertEqual(len(self.log("curl-log")), downloads)
+        # A server that does not answer fails each download after 10 seconds.
+        self.assertEqual(self.log("curl-options"), ["-fsSL --connect-timeout 10 -o"] * 2)
+
+    def test_installer_replaces_another_release(self):
+        (self.cache / "bin").mkdir(parents=True)
+        (self.cache / ".agents-managed").touch()
+        (self.cache / "bin/mermaid-ascii").write_text("old\n")
+        (self.cache / ".mermaid-ascii-version").write_text("1.5.0\n")
+        self.install()
+        self.assertEqual((self.cache / "bin/mermaid-ascii").read_text(), "#!/bin/sh\necho art\n")
+        self.assertEqual((self.cache / ".mermaid-ascii-version").read_text(), PIN + "\n")
+
+    def test_a_failed_download_installs_nothing_and_a_later_run_installs(self):
+        checksums = self.checksums.read_text()
+        self.checksums.unlink()
+        self.assert_refused(self.run_installer(), "could not download")
+        self.assertFalse((self.cache / "bin/mermaid-ascii").exists())
+        self.assertFalse((self.cache / ".mermaid-ascii-version").exists())
+        self.assertFalse((self.cache / "download").exists())
+        self.checksums.write_text(checksums)
+        self.install()
+        self.assertTrue((self.cache / "bin/mermaid-ascii").is_file())
+
+    def test_a_curl_error_of_several_lines_gives_one_reason_line(self):
+        (self.base / "bin/curl").write_text(STUB_CURL_TLS_ERROR)
+        self.assert_refused(
+            self.run_installer(), "curl: (60) SSL certificate problem: self-signed certificate"
+        )
+
     def test_a_checksum_mismatch_installs_nothing(self):
         self.checksums.write_text(re.sub(r"^[0-9a-f]{64}", "0" * 64, self.checksums.read_text(),
                                          flags=re.M))
-        result = self.run_setup()
-        self.assertIn("checksum mismatch", result.stderr)
+        self.assert_refused(self.run_installer(), "checksum mismatch")
         self.assertFalse((self.cache / "bin/mermaid-ascii").exists())
         self.assertFalse((self.cache / ".mermaid-ascii-version").exists())
 
     def test_an_unmanaged_cache_is_left_alone(self):
         self.cache.mkdir(parents=True)
         (self.cache / "mine").write_text("keep\n")
-        result = self.run_setup()
-        self.assertIn("not managed by this repo", result.stderr)
+        self.assert_refused(self.run_installer(), "not managed by mermaid-render")
         self.assertEqual(sorted(p.name for p in self.cache.iterdir()), ["mine"])
+        self.assertEqual(self.log("curl-log"), [])
         self.run_setup("--uninstall")
         self.assertEqual((self.cache / "mine").read_text(), "keep\n")
 
     def test_removed_mods_are_pruned_and_uninstall_removes_links_and_cache(self):
         self.run_setup()
+        self.install()
         old = self.claude / "old-mod"
         old.symlink_to(self.repo.resolve() / "mods/old-mod")
         foreign = self.claude / "foreign"
@@ -1582,6 +1653,7 @@ class ModTests(unittest.TestCase):
 
     def test_uninstall_keeps_the_cache_while_another_clone_links_the_mod(self):
         self.run_setup()
+        self.install()
         other = self.base / "other/mods/mermaid-render"
         other.mkdir(parents=True)
         (self.claude / "mermaid-render").unlink()

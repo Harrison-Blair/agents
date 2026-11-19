@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Render one diagram with the renderer scripts/setup.sh installed, run the way
-# hooks/register.tsx runs it. CI runs this on Linux, macOS, and Windows.
+# Render one diagram with the renderer scripts/install-renderer.sh installed,
+# run the way hooks/register.tsx runs it. CI runs this on Linux, macOS, and
+# Windows.
 set -eu
 
 cache="$HOME/.cache/mermaid-render"
