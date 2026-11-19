@@ -6,8 +6,9 @@
 #                                 statusLine
 #   scripts/setup.sh --sync       what the session-start hooks run: pull,
 #                                 re-link, and re-merge the hook entries
-#   scripts/setup.sh --uninstall  remove the links and hook entries this clone
-#                                 installed, leaving the clone itself alone
+#   scripts/setup.sh --uninstall  remove the links, the hook entries and the
+#                                 Claude Code plugin this clone installed,
+#                                 leaving the clone itself alone
 #
 # With no clone around it -- piped from curl, or a lone downloaded copy -- the
 # script first clones the repo to ${AGENTS_HOME:-~/source/agents} and hands the
@@ -15,7 +16,9 @@
 #
 # Skills are linked one by one into ~/.agents/skills so machine-local skills can
 # live beside them, and global/AGENTS.md supplies each harness's instructions.
-# Hooks are merged into existing config files, never replaced.
+# Claude Code gets the skills and the mods from the plugin hb, which it loads
+# in place from this clone. Hooks are merged into existing config files, never
+# replaced.
 # Every statement lives in a function and the file ends with one `main "$@"`, so
 # the shell parses the whole script before a pull can replace it on disk.
 set -u
@@ -180,15 +183,141 @@ link_skills() {
   done
 }
 
+# The plugin Claude Code installs from this clone, and the catalog that lists
+# it: .claude-plugin/marketplace.json, which claude adds by the clone's path.
+PLUGIN="hb"
+CATALOG="harrison-blair"
+
+# have_claude ADVICE: true when the claude command can be run; one line says
+# so when it cannot.
+have_claude() {
+  command -v claude >/dev/null 2>&1 && return 0
+  echo "skip: claude not on PATH (Claude Code plugin $PLUGIN); $1"
+  return 1
+}
+
+# The links older versions of this script made in ~/.claude/skills, one per
+# line: the whole-directory link to ~/.agents/skills, or else each link to a
+# skill of this clone (it names an ~/.agents/skills entry that is itself a link
+# into this clone) and each link into this clone's mods/. Links to
+# machine-local skills, links elsewhere, and real directories are not listed.
+old_claude_links() {
+  local root="$HOME/.claude/skills" repo_skills agents mods target d name
+  if is_link "$root"; then
+    target="$(resolve "$AGENTS_SKILLS")" || return 0
+    [ "$(resolve "$root")" = "$target" ] && printf '%s\n' "$root"
+    return 0
+  fi
+  repo_skills="$(unix_path "$REPO/skills")"
+  agents="$(unix_path "$AGENTS_SKILLS")"
+  mods="$(unix_path "$REPO/mods")"
+  for d in "$root"/*; do
+    name="$(basename "$d")"
+    case "$(link_target "$d")" in
+      "$mods"/*) ;;
+      "$agents/$name")
+        case "$(link_target "$AGENTS_SKILLS/$name")" in
+          "$repo_skills"/*) ;;
+          *) continue ;;
+        esac
+        ;;
+      *) continue ;;
+    esac
+    printf '%s\n' "$d"
+  done
+}
+
+remove_old_claude_links() {
+  local link
+  old_claude_links | while IFS= read -r link; do
+    unlink_dir "$link" && echo "removed: $link"
+  done
+}
+
+# The catalog as Claude Code lists it: its path when it was added from a
+# directory, else the kind of its source; nothing when there is no catalog of
+# that name. Fails when the list cannot be read.
+catalog_origin() {
+  local py="" list
+  if command -v python3 >/dev/null 2>&1; then py=python3
+  elif command -v python >/dev/null 2>&1; then py=python
+  fi
+  [ -n "$py" ] || return 1
+  list="$(claude plugin marketplace list --json)" || return 1
+  # Python ends the pipeline, so its failure is the failure of this function.
+  # No print: on Windows it ends a line with CR LF.
+  printf '%s' "$list" | CATALOG="$CATALOG" "$py" -c '
+import json, os, sys
+for entry in json.load(sys.stdin):
+    if entry.get("name") == os.environ["CATALOG"]:
+        sys.stdout.write(entry.get("path") or entry.get("source"))
+'
+}
+
+# Install the plugin, and with it the mods it depends on, from this clone's
+# catalog. claude adds the catalog first when it is new, and refuses when a
+# catalog of that name is already added from another source. A catalog whose
+# directory is gone is what a moved or deleted clone left: it is removed, and
+# the install runs again. A catalog from a clone that exists, or from a remote
+# source, stays. Succeeds only when Claude Code has the plugin from this clone
+# afterwards.
+install_plugin() {
+  local reason origin installed=0
+  have_claude "run scripts/setup.sh again when claude is on the PATH" || return 1
+  if reason="$(run_plugin_install)"; then
+    installed=1
+  else
+    origin="$(catalog_origin)" && origin="$(unix_path "$origin")"
+    case "$origin" in
+      /*)
+        [ ! -d "$origin" ] &&
+          claude plugin marketplace remove "$CATALOG" >/dev/null 2>&1 &&
+          reason="$(run_plugin_install)" &&
+          installed=1
+        ;;
+    esac
+  fi
+  if [ "$installed" = 1 ]; then
+    echo "plugin: $PLUGIN@$CATALOG is installed in Claude Code from $REPO"
+    return 0
+  fi
+  echo "warn: claude plugin install $PLUGIN failed, so the old links in ~/.claude/skills stay; correct the cause and run scripts/setup.sh again: $reason" >&2
+  return 1
+}
+
+# The install command; its error text is the only output.
+run_plugin_install() {
+  { claude plugin install "$PLUGIN" --marketplace "$REPO" >/dev/null; } 2>&1
+}
+
+# Claude Code: the plugin, then ~/.claude/skills. Setup always installs the
+# plugin. --sync installs it only while old links remain, because a pull is
+# enough to update a plugin that Claude Code loads in place.
+setup_claude() {
+  local installed=0
+  if [ "$MODE" != --sync ] || [ -n "$(old_claude_links)" ]; then
+    install_plugin && installed=1
+  fi
+  link_claude_skills "$installed"
+}
+
+# link_claude_skills INSTALLED: link every machine-local skill in
+# ~/.agents/skills into ~/.claude/skills. A link into the skills of a clone of
+# this repository, this one or another, is not linked: Claude Code gets those
+# skills from the plugin. With INSTALLED 1 the plugin is in place, and the old
+# links to this clone go; otherwise they stay, so that Claude Code does not
+# lose a skill.
 link_claude_skills() {
   [ -d "$HOME/.claude" ] || { echo "skip: ~/.claude not found (Claude Code)"; return 0; }
-  local root="$HOME/.claude/skills" target d name
+  local root="$HOME/.claude/skills" installed="$1" target d name
   target="$(resolve "$AGENTS_SKILLS")" || return 1
   if is_link "$root"; then
     if [ "$(resolve "$root")" != "$target" ]; then
       echo "warn: $root is not a link to $AGENTS_SKILLS; left untouched" >&2
       return 1
     fi
+    # The old whole-directory link already shows every machine-local skill.
+    [ "$installed" = 1 ] || return 0
     # Migrate the old whole-directory link without touching its contents.
     # A Windows junction needs rmdir (never /S); a symlink only needs unlinking.
     if [ -L "$root" ]; then
@@ -201,9 +330,14 @@ link_claude_skills() {
     return 1
   fi
   mkdir -p "$root" || return 1
+  [ "$installed" = 1 ] && remove_old_claude_links
   for d in "$AGENTS_SKILLS"/*; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
+    target="$(link_target "$d")"
+    case "$target" in
+      */skills/*) looks_like_clone "${target%/skills/*}" && continue ;;
+    esac
     link_dir "$root/$name" "$d"
   done
   if is_windows; then
@@ -238,30 +372,6 @@ link_pi() {
     [ -L "$ext" ] || continue
     case "$(readlink "$ext")" in
       "$REPO"/pi/*) [ -e "$ext" ] || { rm "$ext"; echo "pruned: $(basename "$ext")"; } ;;
-    esac
-  done
-}
-
-# Every folder under mods/ is a Claude Code mod. Claude Code loads a plugin
-# from ~/.claude/skills/<name>, so each mod is linked there under its own name,
-# and a link into this clone's mods/ whose target is gone is pruned.
-link_mods() {
-  local root="$HOME/.claude/skills" mod
-  [ -d "$HOME/.claude" ] || return 0
-  [ -d "$REPO/mods" ] || return 0
-  mkdir -p "$root"
-  for mod in "$REPO"/mods/*/; do
-    [ -d "$mod" ] || continue
-    link_dir "$root/$(basename "$mod")" "${mod%/}"
-  done
-  if is_windows; then
-    prune_junctions "$root" "$REPO/mods"
-    return 0
-  fi
-  for mod in "$root"/*; do
-    [ -L "$mod" ] || continue
-    case "$(readlink "$mod")" in
-      "$REPO"/mods/*) [ -e "$mod" ] || { rm "$mod"; echo "pruned: mods/$(basename "$mod")"; } ;;
     esac
   done
 }
@@ -1163,9 +1273,8 @@ pull() {
 reconcile() {
   echo "repo: $REPO"
   link_skills
-  link_claude_skills
+  setup_claude
   link_pi
-  link_mods
   link_agents_md
   link_commands
   apply_hooks merge
@@ -1173,44 +1282,61 @@ reconcile() {
   return 0
 }
 
+# Take the plugin out of Claude Code, and the mods with it, then the catalog --
+# but only when the catalog is this clone's. Fails while Claude Code still has
+# a catalog of that name: one from another source, or one that did not go.
+remove_plugin() {
+  local origin reason
+  have_claude "an installed plugin stays" || return 0
+  if ! origin="$(catalog_origin)"; then
+    echo "warn: could not read the Claude Code catalogs; plugin $PLUGIN left as it is" >&2
+    return 1
+  fi
+  [ -n "$origin" ] || return 0
+  if [ "$(unix_path "$origin")" != "$(unix_path "$REPO")" ]; then
+    echo "kept: Claude Code catalog $CATALOG, which is not from this clone ($origin)"
+    return 1
+  fi
+  if reason="$({ claude plugin uninstall "$PLUGIN@$CATALOG" --prune -y >/dev/null; } 2>&1)"; then
+    echo "removed: Claude Code plugin $PLUGIN@$CATALOG"
+  else
+    echo "warn: claude plugin uninstall $PLUGIN@$CATALOG failed: $reason" >&2
+  fi
+  if reason="$({ claude plugin marketplace remove "$CATALOG" >/dev/null; } 2>&1)"; then
+    echo "removed: Claude Code catalog $CATALOG"
+    return 0
+  fi
+  echo "warn: claude plugin marketplace remove $CATALOG failed: $reason" >&2
+  return 1
+}
+
 # Undo what this clone installed, and only that: a link goes when the target it
 # records is inside this clone -- or, in Claude's directory, is an
 # ~/.agents/skills entry that is itself one of those links. Real directories,
 # links pointing anywhere else, and hooks this repo did not write all stay.
 uninstall() {
-  local root="$HOME/.claude/skills" repo_skills agents pi d name
+  local root="$HOME/.claude/skills" repo_skills agents pi d catalog_left=0
   repo_skills="$(unix_path "$REPO/skills")"
   agents="$(unix_path "$AGENTS_SKILLS")"
   echo "repo: $REPO"
+  remove_plugin || catalog_left=1
   if [ "$(link_target "$root")" = "$agents" ]; then
     # The pre-split whole-directory link; unlinking leaves the shared dir whole.
     unlink_dir "$root" && echo "removed: $root"
   elif [ -d "$root" ]; then
     # Claude's links go first: each names an ~/.agents/skills entry that the
     # next loop deletes, and a vanished entry can no longer vouch for them.
-    for d in "$root"/*; do
-      name="$(basename "$d")"
-      [ "$(link_target "$d")" = "$agents/$name" ] || continue
-      case "$(link_target "$AGENTS_SKILLS/$name")" in
-        "$repo_skills"/*) ;;
-        *) continue ;;
-      esac
-      unlink_dir "$d" && echo "removed: $d"
-    done
+    remove_old_claude_links
   fi
   for d in "$AGENTS_SKILLS"/*; do
     case "$(link_target "$d")" in
       "$repo_skills"/*) unlink_dir "$d" && echo "removed: $d" ;;
     esac
   done
-  # Every link into this clone's mods/. The renderer cache is shared by every
-  # clone, so it goes only when no other clone's mermaid-render link is left.
-  for d in "$root"/*; do
-    case "$(link_target "$d")" in
-      "$(unix_path "$REPO/mods")"/*) unlink_dir "$d" && echo "removed: $d" ;;
-    esac
-  done
-  [ -e "$root/mermaid-render" ] || remove_mermaid_renderers
+  # The renderer cache is shared by every clone and every copy of the plugin,
+  # so it goes only when no user of it is left: no mermaid-render entry in
+  # ~/.claude/skills (another clone's old link) and no catalog in Claude Code.
+  [ -e "$root/mermaid-render" ] || [ "$catalog_left" = 1 ] || remove_mermaid_renderers
   # Every link into this clone's pi/, including one left by a renamed extension.
   for pi in "$HOME/.pi/agent/extensions"/*; do
     case "$(link_target "$pi")" in

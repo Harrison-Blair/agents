@@ -200,6 +200,17 @@ class ValidatorTests(unittest.TestCase):
         )
         self.assertNotIn("'demo'", result.stdout)
 
+    def test_version_in_the_manifest_of_a_claude_catalog_entry_is_reported(self):
+        self.write_json("mods/extra/.claude-plugin/plugin.json",
+                        {"name": "extra", "version": "0.1.0"})
+        result = self.run_validator()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "  - mods/extra/.claude-plugin/plugin.json: key 'version' is not permitted",
+            result.stdout,
+        )
+        self.assertEqual(result.stdout.count("is not permitted"), 1, result.stdout)
+
     def test_dependency_must_be_a_claude_catalog_entry(self):
         self.write_json(".claude-plugin/plugin.json", {**MANIFEST, "dependencies": ["extra", "gone"]})
         result = self.run_validator()

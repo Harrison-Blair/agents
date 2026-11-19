@@ -69,6 +69,43 @@ fi
 exit 1
 """
 
+# Stand-in for the claude command. It records each call and keeps the catalog
+# list as the real command does: an install adds the catalog by its path, and
+# a second source for the same catalog name is refused. An uninstall of a
+# plugin that is not installed fails, as the real command does.
+STUB_CLAUDE = r"""#!/bin/sh
+state="$CLAUDE_STUB"
+mkdir -p "$state"
+printf '%s\n' "$*" >> "$state/calls"
+case "$*" in
+  "plugin install hb --marketplace "*)
+    if [ -e "$state/install-error" ]; then
+      cat "$state/install-error" >&2
+      exit 1
+    fi
+    if [ -e "$state/list" ] && ! grep -qF "\"path\": \"$5\"" "$state/list"; then
+      echo "Failed to add marketplace: Marketplace \"harrison-blair\" is already added from a different source." >&2
+      exit 1
+    fi
+    printf '[{"name": "harrison-blair", "source": "directory", "path": "%s"}]\n' "$5" > "$state/list"
+    : > "$state/installed"
+    echo "Successfully installed plugin: hb@harrison-blair"
+    ;;
+  "plugin marketplace list --json") cat "$state/list" 2>/dev/null || echo "[]" ;;
+  "plugin uninstall hb@harrison-blair --prune -y")
+    if ! rm "$state/installed" 2>/dev/null; then
+      echo 'Plugin "hb@harrison-blair" not found in installed plugins' >&2
+      exit 1
+    fi
+    ;;
+  "plugin marketplace remove harrison-blair")
+    rm "$state/list" || exit 1
+    rm -f "$state/installed"
+    ;;
+  *) echo "claude stub: unexpected call: $*" >&2; exit 2 ;;
+esac
+"""
+
 
 class SetupTests(unittest.TestCase):
     def setUp(self):
@@ -101,6 +138,13 @@ class SetupTests(unittest.TestCase):
         git.write_text(STUB_GIT)
         git.chmod(0o755)
         self.env["PATH"] = str(bin_dir) + os.pathsep + self.env["PATH"]
+        # The claude command is always a stand-in: the real one would change the
+        # plugins of the person who runs the tests.
+        self.claude_state = self.base / "claude-stub"
+        self.env["CLAUDE_STUB"] = str(self.claude_state)
+        claude = bin_dir / "claude"
+        claude.write_text(STUB_CLAUDE)
+        claude.chmod(0o755)
         self.skill = self.add_skill(self.repo / "skills/shared-one")
         (self.repo / "pi/agents-autopull").mkdir(parents=True)
         (self.repo / "pi/example-extension").mkdir(parents=True)
@@ -127,12 +171,58 @@ class SetupTests(unittest.TestCase):
         return [h["command"] for g in data["hooks"][event] for h in g["hooks"]]
 
     def assert_shared_link(self):
+        """The skill is shared, and Claude Code has no link to it."""
         self.assertTrue(self.claude.is_dir())
         self.assertFalse(self.claude.is_symlink())
-        self.assertEqual(
-            (self.claude / "shared-one").readlink(), self.shared / "shared-one"
-        )
-        self.assertEqual((self.claude / "shared-one").resolve(), self.skill.resolve())
+        self.assertEqual((self.shared / "shared-one").resolve(), self.skill.resolve())
+        self.assertFalse((self.claude / "shared-one").is_symlink())
+
+    def claude_calls(self):
+        """The arguments of each call of the claude stand-in, one line per call."""
+        calls = self.claude_state / "calls"
+        return calls.read_text().splitlines() if calls.exists() else []
+
+    def install_call(self, repo=None):
+        return "plugin install hb --marketplace %s" % Path(repo or self.repo).resolve()
+
+    def hide_claude(self):
+        """Take the claude command off the PATH, also a real one."""
+        (self.base / "bin/claude").unlink()
+        entries = []
+        for number, entry in enumerate(self.env["PATH"].split(os.pathsep)):
+            if not shutil.which("claude", path=entry):
+                entries.append(entry)
+                continue
+            # The directory of a real claude can also hold tools that the
+            # script needs, so a copy of it without claude takes its place.
+            mirror = self.base / ("path-%d" % number)
+            mirror.mkdir()
+            for tool in Path(entry).iterdir():
+                if tool.name != "claude":
+                    (mirror / tool.name).symlink_to(tool)
+            entries.append(str(mirror))
+        self.env["PATH"] = os.pathsep.join(entries)
+
+    def add_other_clone(self):
+        """A second clone that still exists, with the layout that setup.sh looks for."""
+        other = self.base / "other-clone"
+        (other / "scripts").mkdir(parents=True)
+        (other / "scripts/setup.sh").touch()
+        (other / "hooks").mkdir()
+        return other
+
+    def add_old_links(self):
+        """The links setup made before Claude Code got the plugin."""
+        if not (self.shared / "shared-one").is_symlink():
+            (self.shared / "shared-one").symlink_to(self.skill.resolve())
+        self.claude.mkdir(exist_ok=True)
+        skill_link = self.claude / "shared-one"
+        skill_link.symlink_to(self.shared / "shared-one")
+        mod = self.repo / "mods/mermaid-render"
+        mod.mkdir(parents=True, exist_ok=True)
+        mod_link = self.claude / "mermaid-render"
+        mod_link.symlink_to(mod.resolve())
+        return skill_link, mod_link
 
     def test_fresh_setup_and_repeat_preserve_hooks(self):
         settings = self.claude.parent / "settings.json"
@@ -153,6 +243,7 @@ class SetupTests(unittest.TestCase):
                 self.run_setup(mode)
                 self.assert_shared_link()
                 self.assertEqual((self.claude / local.name).resolve(), local.resolve())
+                self.assertEqual([p.name for p in self.claude.iterdir()], [local.name])
                 self.assertEqual((local / "SKILL.md").read_text(),
                                  "local contents must survive\n")
                 shutil.rmtree(self.claude)
@@ -185,7 +276,8 @@ class SetupTests(unittest.TestCase):
         self.run_setup("--sync")
         self.assertFalse((self.shared / "shared-one").is_symlink())
         self.assertFalse((self.claude / "shared-one").is_symlink())
-        self.assertEqual((self.claude / "new-skill").resolve(), added.resolve())
+        self.assertEqual((self.shared / "new-skill").resolve(), added.resolve())
+        self.assertFalse((self.claude / "new-skill").is_symlink())
         self.assertEqual((self.claude / shared_local.name).resolve(), shared_local.resolve())
         self.assertEqual((self.claude / "external").resolve(), external.resolve())
         for name in ("unrelated-broken", "different-name"):
@@ -211,8 +303,7 @@ class SetupTests(unittest.TestCase):
         result = self.run_setup("--sync")
         self.assertEqual((self.shared / "shared-one").resolve(),
                          (moved / "skills/shared-one").resolve())
-        self.assertEqual((self.claude / "shared-one").resolve(),
-                         (moved / "skills/shared-one").resolve())
+        self.assertFalse((self.claude / "shared-one").is_symlink())
         self.assertEqual((extensions / "agents-autopull").resolve(),
                          (moved / "pi/agents-autopull").resolve())
         self.assertIn("elsewhere", result.stderr)
@@ -237,12 +328,13 @@ class SetupTests(unittest.TestCase):
         # A live link elsewhere is kept; a dangling one holds nothing and is
         # replaced with the link setup wanted there.
         self.claude.mkdir()
+        local = self.add_skill(self.shared / "machine-shared")
         for exists in (True, False):
             with self.subTest(exists=exists):
                 target = self.base / ("external" if exists else "missing")
                 if exists:
                     self.add_skill(target)
-                link = self.claude / "shared-one"
+                link = self.claude / "machine-shared"
                 link.symlink_to(target, target_is_directory=True)
                 result = self.run_setup("--sync")
                 if exists:
@@ -250,7 +342,7 @@ class SetupTests(unittest.TestCase):
                     self.assertEqual(link.readlink(), target)
                 else:
                     self.assertNotIn("left untouched", result.stderr)
-                    self.assertEqual(link.readlink(), self.shared / "shared-one")
+                    self.assertEqual(link.readlink(), local)
                 link.unlink()
 
     def test_file_in_place_of_root_is_preserved(self):
@@ -531,8 +623,9 @@ class SetupTests(unittest.TestCase):
         # vouches for nothing inside the clone, so it is not this repo's to drop.
         shared_local = self.add_skill(self.shared / "machine-shared")
         self.run_setup()
-        self.assertTrue((self.claude / "shared-one").is_symlink())
         self.assertTrue((self.claude / "machine-shared").is_symlink())
+        # A link of an older setup that no install has removed.
+        (self.claude / "shared-one").symlink_to(self.shared / "shared-one")
         # Every folder under pi/ is linked as an extension of the same name.
         self.assertTrue((extensions / "agents-autopull").is_symlink())
         self.assertTrue((extensions / "example-extension").is_symlink())
@@ -628,10 +721,12 @@ class SetupTests(unittest.TestCase):
         self.assertIn("cloning", result.stdout)
         self.assertEqual((self.home / "cloned-url").read_text().strip(),
                          "https://github.com/Harrison-Blair/agents.git")
-        # The run continued inside the clone: its skills are linked and the hook
-        # names the clone, not the directory the loose copy sat in.
-        self.assertEqual((self.claude / "shared-one").resolve(),
+        # The run continued inside the clone: its skills are linked, its plugin
+        # is installed, and the hook names the clone, not the directory the
+        # loose copy sat in.
+        self.assertEqual((self.shared / "shared-one").resolve(),
                          (clone / "skills/shared-one").resolve())
+        self.assertEqual(self.claude_calls(), [self.install_call(clone)])
         self.assertEqual(self.hook_commands(self.claude.parent / "settings.json"),
                          [self.sync_command(clone)])
         self.assertIn("Next steps", result.stdout)
@@ -730,7 +825,7 @@ prune_junctions "$1" "$2"
         self.assertEqual((self.home / "removed").read_text().splitlines(),
                          ["X:" + str(self.shared / "gone").replace("/", "\\")])
 
-    def run_windows_boundary(self, fail_removal=False, unrelated=False):
+    def run_windows_boundary(self, fail_removal=False, unrelated=False, installed=True):
         # Represent a junction as a real directory and emulate its resolution.
         # The actual target contains a sentinel; it must not be removed.
         self.claude.mkdir()
@@ -749,13 +844,13 @@ resolve() {
 cygpath() { echo "$2"; }
 cmd() {
   case "$2" in
-    dir) echo skills ;;
+    dir) [ -e "$AGENTS_TEST_HOME/unlinked" ] || echo skills ;;
     rmdir)
       [ "$#" = 3 ] || exit 91
       [ "$3" = "$AGENTS_TEST_HOME/.claude/skills" ] || exit 92
       echo removal > "$AGENTS_TEST_HOME/removal"
       [ "$TEST_FAIL_REMOVAL" = 0 ] || return 1
-      rmdir "$3"
+      rmdir "$3" && : > "$AGENTS_TEST_HOME/unlinked"
       ;;
     mklink)
       [ "$#" = 5 ] && [ "$3" = /J ] || exit 93
@@ -765,10 +860,10 @@ cmd() {
     *) exit 94 ;;
   esac
 }
-link_claude_skills
+link_claude_skills "$1"
 ''')
         result = subprocess.run(
-            ["bash", str(harness)], text=True, capture_output=True,
+            ["bash", str(harness), str(int(installed))], text=True, capture_output=True,
             env=dict(self.env, TEST_FAIL_REMOVAL=str(int(fail_removal)),
                      TEST_UNRELATED=str(int(unrelated))),
         )
@@ -788,12 +883,253 @@ link_claude_skills
         self.assertTrue((self.home / "removal").is_file())
         self.assertEqual(list(self.claude.iterdir()), [])
 
+    def test_windows_junction_stays_while_the_plugin_is_not_installed(self):
+        result = self.run_windows_boundary(installed=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.home / "removal").exists())
+        self.assertEqual(list(self.claude.iterdir()), [])
+
     def test_windows_unrelated_junction_is_preserved(self):
         result = self.run_windows_boundary(unrelated=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("left untouched", result.stderr)
         self.assertFalse((self.home / "removal").exists())
         self.assertEqual(list(self.claude.iterdir()), [])
+
+    # --- The Claude Code plugin -------------------------------------------
+
+    def set_catalog(self, entry):
+        """Make the claude stand-in list one catalog."""
+        self.claude_state.mkdir(exist_ok=True)
+        (self.claude_state / "list").write_text(json.dumps([entry]) + "\n")
+
+    def assert_old_links_remain(self, skill_link, mod_link):
+        self.assertEqual(skill_link.readlink(), self.shared / "shared-one")
+        self.assertEqual(mod_link.resolve(), (self.repo / "mods/mermaid-render").resolve())
+
+    def test_setup_installs_the_plugin_from_this_clone(self):
+        result = self.run_setup()
+        self.assertEqual(self.claude_calls(), [self.install_call()])
+        self.assertIn("plugin: hb@harrison-blair", result.stdout)
+        self.assert_shared_link()
+
+    def test_setup_without_claude_says_skip_and_keeps_the_old_links(self):
+        skill_link, mod_link = self.add_old_links()
+        local = self.add_skill(self.shared / "machine-shared")
+        self.add_skill(self.repo / "skills/new-skill")
+        self.hide_claude()
+        result = self.run_setup()
+        skips = [line for line in result.stdout.splitlines() if "claude not on PATH" in line]
+        self.assertEqual(len(skips), 1, result.stdout)
+        self.assertTrue(skips[0].startswith("skip:"), skips[0])
+        self.assertIn("run scripts/setup.sh again", skips[0])
+        self.assert_old_links_remain(skill_link, mod_link)
+        # No new link to a skill of the clone: that is the task of the plugin.
+        self.assertTrue((self.shared / "new-skill").is_symlink())
+        self.assertFalse((self.claude / "new-skill").is_symlink())
+        # The steps that need only ~/.claude ran: the machine-local skill, the
+        # instructions, the hook, and the statusline.
+        self.assertEqual((self.claude / "machine-shared").readlink(), local)
+        self.assertTrue((self.claude.parent / "CLAUDE.md").is_symlink())
+        settings = self.claude.parent / "settings.json"
+        self.assertEqual(self.hook_commands(settings), [self.sync_command()])
+        self.assertIn("statusLine", json.loads(settings.read_text()))
+
+    def test_a_successful_install_removes_the_old_links_and_keeps_the_others(self):
+        skill_link, mod_link = self.add_old_links()
+        local = self.add_skill(self.shared / "machine-shared")
+        (self.claude / "machine-shared").symlink_to(local)
+        added = self.add_skill(self.shared / "machine-new")
+        own = self.add_skill(self.claude / "claude-only")
+        external = self.add_skill(self.base / "external")
+        (self.claude / "external").symlink_to(external)
+        result = self.run_setup()
+        for link in (skill_link, mod_link):
+            self.assertFalse(link.is_symlink(), link)
+            self.assertIn("removed: %s" % link, result.stdout)
+        self.assertEqual(result.stdout.count("removed:"), 2, result.stdout)
+        self.assertEqual((self.claude / "machine-shared").readlink(), local)
+        self.assertEqual((self.claude / "machine-new").readlink(), added)
+        self.assertEqual((self.claude / "external").readlink(), external)
+        self.assertTrue((own / "SKILL.md").is_file())
+        # Codex, Cursor and Pi read the shared directory, which keeps the skill.
+        self.assertEqual((self.shared / "shared-one").resolve(), self.skill.resolve())
+        self.assertTrue((self.skill / "SKILL.md").is_file())
+        self.assertTrue((self.repo / "mods/mermaid-render").is_dir())
+
+    def test_a_failed_install_warns_with_the_reason_and_changes_nothing(self):
+        skill_link, mod_link = self.add_old_links()
+        self.claude_state.mkdir()
+        (self.claude_state / "install-error").write_text("Failed to install: no network\n")
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                result = self.run_setup(mode)
+                self.assertIn("warn: claude plugin install hb failed", result.stderr)
+                self.assertIn("run scripts/setup.sh again", result.stderr)
+                self.assertIn("Failed to install: no network", result.stderr)
+                self.assert_old_links_remain(skill_link, mod_link)
+
+    def test_a_catalog_from_another_source_warns_and_changes_nothing(self):
+        other = self.base / "other-clone"
+        other.mkdir()
+        entries = (
+            {"name": "harrison-blair", "source": "directory", "path": str(other)},
+            {"name": "harrison-blair", "source": "github", "repo": "Harrison-Blair/agents"},
+        )
+        skill_link, mod_link = self.add_old_links()
+        for entry in entries:
+            with self.subTest(source=entry["source"]):
+                self.set_catalog(entry)
+                result = self.run_setup()
+                self.assertIn("already added from a different source", result.stderr)
+                self.assert_old_links_remain(skill_link, mod_link)
+                self.assertEqual(json.loads((self.claude_state / "list").read_text()), [entry])
+                self.assertNotIn("plugin marketplace remove harrison-blair", self.claude_calls())
+
+    def test_a_skill_link_of_another_clone_gets_no_claude_link(self):
+        # Claude Code has that skill from the plugin of the other clone.
+        other = self.add_skill(self.add_other_clone() / "skills/shared-one")
+        (self.shared / "shared-one").symlink_to(other)
+        local = self.add_skill(self.shared / "local-skill")
+        self.set_catalog({"name": "harrison-blair", "source": "directory",
+                          "path": str(self.base / "other-clone")})
+        result = self.run_setup()
+        self.assertIn("already added from a different source", result.stderr)
+        self.assertFalse((self.claude / "shared-one").is_symlink())
+        self.assertEqual((self.claude / "local-skill").resolve(), local.resolve())
+        self.assertEqual((self.shared / "shared-one").readlink(), other)
+
+    def test_a_skill_that_only_another_clone_has_gets_no_claude_link(self):
+        other = self.add_skill(self.add_other_clone() / "skills/newer-only")
+        (self.shared / "newer-only").symlink_to(other)
+        self.set_catalog({"name": "harrison-blair", "source": "directory",
+                          "path": str(self.base / "other-clone")})
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                self.run_setup(mode)
+                self.assertFalse((self.claude / "newer-only").is_symlink())
+                self.assertEqual((self.shared / "newer-only").readlink(), other)
+
+    def test_a_link_to_a_place_that_is_not_a_clone_gets_its_claude_link(self):
+        # The name of a skill of this clone and a skills directory do not make
+        # the target a clone.
+        notes = self.add_skill(self.base / "notes/skills/shared-one")
+        (self.shared / "shared-one").symlink_to(notes)
+        self.run_setup()
+        self.assertEqual((self.claude / "shared-one").readlink(), self.shared / "shared-one")
+
+    def test_a_plain_directory_with_the_name_of_a_skill_gets_its_claude_link(self):
+        local = self.add_skill(self.shared / "shared-one")
+        self.run_setup()
+        self.assertEqual((self.claude / "shared-one").readlink(), local)
+
+    def test_a_catalog_of_a_clone_that_is_gone_is_replaced(self):
+        skill_link, mod_link = self.add_old_links()
+        self.set_catalog({"name": "harrison-blair", "source": "directory",
+                          "path": str(self.base / "gone")})
+        result = self.run_setup()
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(self.claude_calls(), [
+            self.install_call(), "plugin marketplace list --json",
+            "plugin marketplace remove harrison-blair", self.install_call(),
+        ])
+        self.assertEqual(json.loads((self.claude_state / "list").read_text())[0]["path"],
+                         str(self.repo.resolve()))
+        self.assertFalse(skill_link.is_symlink())
+        self.assertFalse(mod_link.is_symlink())
+
+    def test_sync_installs_the_plugin_only_while_old_links_remain(self):
+        self.run_setup("--sync")
+        self.assertEqual(self.claude_calls(), [])
+        skill_link, mod_link = self.add_old_links()
+        self.run_setup("--sync")
+        self.assertEqual(self.claude_calls(), [self.install_call()])
+        self.assertFalse(skill_link.is_symlink())
+        self.assertFalse(mod_link.is_symlink())
+        self.run_setup("--sync")
+        self.assertEqual(self.claude_calls(), [self.install_call()])
+        # One old link is enough, also when it is the link of the mod alone.
+        mod_link.symlink_to((self.repo / "mods/mermaid-render").resolve())
+        self.run_setup("--sync")
+        self.assertEqual(self.claude_calls(), [self.install_call()] * 2)
+        self.assertFalse(mod_link.is_symlink())
+
+    def test_whole_directory_link_stays_until_the_plugin_is_installed(self):
+        local = self.add_skill(self.shared / "machine-shared")
+        self.claude.symlink_to(self.shared, target_is_directory=True)
+        self.claude_state.mkdir()
+        (self.claude_state / "install-error").write_text("Failed to install: no network\n")
+        for mode in ("setup", "--sync"):
+            with self.subTest(mode=mode):
+                self.run_setup(mode)
+                self.assertEqual(self.claude.readlink(), self.shared)
+        (self.claude_state / "install-error").unlink()
+        self.run_setup("--sync")
+        self.assertFalse(self.claude.is_symlink())
+        self.assertEqual([p.name for p in self.claude.iterdir()], [local.name])
+
+    def test_uninstall_removes_the_plugin_and_the_catalog_of_this_clone(self):
+        self.run_setup()
+        result = self.run_setup("--uninstall")
+        self.assertEqual(self.claude_calls()[1:], [
+            "plugin marketplace list --json",
+            "plugin uninstall hb@harrison-blair --prune -y",
+            "plugin marketplace remove harrison-blair",
+        ])
+        self.assertIn("removed: Claude Code plugin hb@harrison-blair", result.stdout)
+        self.assertIn("removed: Claude Code catalog harrison-blair", result.stdout)
+
+    def test_uninstall_removes_the_catalog_after_the_user_uninstalled_the_plugin(self):
+        self.run_setup()
+        (self.claude_state / "installed").unlink()
+        result = self.run_setup("--uninstall")
+        self.assertIn("not found in installed plugins", result.stderr)
+        self.assertIn("removed: Claude Code catalog harrison-blair", result.stdout)
+        self.assertFalse((self.claude_state / "list").exists())
+
+    def test_uninstall_leaves_a_catalog_that_is_not_from_this_clone(self):
+        other = self.base / "other-clone"
+        other.mkdir()
+        entries = (
+            {"name": "harrison-blair", "source": "directory", "path": str(other)},
+            {"name": "harrison-blair", "source": "github", "repo": "Harrison-Blair/agents"},
+            {"name": "another-catalog", "source": "directory", "path": str(self.repo.resolve())},
+        )
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.set_catalog(entry)
+                result = self.run_setup("--uninstall")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(self.claude_calls(), ["plugin marketplace list --json"])
+                self.assertEqual("kept: Claude Code catalog" in result.stdout,
+                                 entry["name"] == "harrison-blair")
+                (self.claude_state / "calls").unlink()
+
+    def test_uninstall_without_claude_says_skip(self):
+        self.hide_claude()
+        result = self.run_setup("--uninstall")
+        self.assertIn("skip: claude not on PATH", result.stdout)
+        self.assertIn("an installed plugin stays", result.stdout)
+        self.assertNotIn("run scripts/setup.sh again", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_repeated_runs_change_nothing_and_print_no_error(self):
+        self.add_old_links()
+        self.add_skill(self.shared / "machine-shared")
+        for mode in ("setup", "--sync", "--uninstall"):
+            with self.subTest(mode=mode):
+                self.run_setup(mode)
+                state = self.home_state()
+                result = self.run_setup(mode)
+                self.assertEqual(self.home_state(), state)
+                self.assertEqual(result.stderr, "")
+        self.assertEqual(self.claude_calls(), [
+            self.install_call(), self.install_call(),
+            "plugin marketplace list --json",
+            "plugin uninstall hb@harrison-blair --prune -y",
+            "plugin marketplace remove harrison-blair",
+            "plugin marketplace list --json",
+        ])
 
     # --- AGENTS.md linking ------------------------------------------------
 
@@ -1510,6 +1846,8 @@ class ModTests(unittest.TestCase):
     # The SetupTests fixture, without running its tests a second time.
     run_setup = SetupTests.run_setup
     add_skill = SetupTests.add_skill
+    hide_claude = SetupTests.hide_claude
+    claude_calls = SetupTests.claude_calls
 
     def setUp(self):
         SetupTests.setUp(self)
@@ -1559,9 +1897,9 @@ class ModTests(unittest.TestCase):
         self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
         self.assertIn(reason, result.stderr)
 
-    def test_setup_links_mods_and_downloads_nothing(self):
+    def test_setup_links_no_mod_and_downloads_nothing(self):
         self.run_setup()
-        self.assertEqual((self.claude / "mermaid-render").resolve(), self.mod.resolve())
+        self.assertFalse((self.claude / "mermaid-render").is_symlink())
         self.assertFalse(self.cache.exists())
         self.assertEqual(self.log("curl-log"), [])
 
@@ -1571,9 +1909,9 @@ class ModTests(unittest.TestCase):
         self.assertFalse((self.cache / "node_modules").exists())
         self.assertNotIn("mermaid-cli", result.stdout + result.stderr)
 
-    def test_sync_links_mods_but_installs_nothing(self):
+    def test_sync_links_no_mod_and_downloads_nothing(self):
         self.run_setup("--sync")
-        self.assertEqual((self.claude / "mermaid-render").resolve(), self.mod.resolve())
+        self.assertFalse((self.claude / "mermaid-render").is_symlink())
         self.assertFalse(self.cache.exists())
         self.assertEqual(self.log("curl-log"), [])
 
@@ -1634,20 +1972,19 @@ class ModTests(unittest.TestCase):
         self.run_setup("--uninstall")
         self.assertEqual((self.cache / "mine").read_text(), "keep\n")
 
-    def test_removed_mods_are_pruned_and_uninstall_removes_links_and_cache(self):
+    def test_uninstall_removes_old_mod_links_and_the_cache(self):
         self.run_setup()
         self.install()
+        # Links of an older setup: the mod, and a mod that is gone from the clone.
+        mod_link = self.claude / "mermaid-render"
+        mod_link.symlink_to(self.mod.resolve())
         old = self.claude / "old-mod"
         old.symlink_to(self.repo.resolve() / "mods/old-mod")
         foreign = self.claude / "foreign"
         foreign.symlink_to(self.base / "missing")
-        # --sync prunes the same way but prints nothing.
-        result = self.run_setup()
-        self.assertIn("pruned: mods/old-mod", result.stdout)
-        self.assertFalse(old.is_symlink())
-        self.assertTrue(foreign.is_symlink())
         self.run_setup("--uninstall")
-        self.assertFalse((self.claude / "mermaid-render").is_symlink())
+        self.assertFalse(mod_link.is_symlink())
+        self.assertFalse(old.is_symlink())
         self.assertFalse(self.cache.exists())
         self.assertTrue(foreign.is_symlink())
 
@@ -1656,11 +1993,37 @@ class ModTests(unittest.TestCase):
         self.install()
         other = self.base / "other/mods/mermaid-render"
         other.mkdir(parents=True)
-        (self.claude / "mermaid-render").unlink()
         (self.claude / "mermaid-render").symlink_to(other)
         self.run_setup("--uninstall")
         self.assertTrue((self.claude / "mermaid-render").is_symlink())
         self.assertTrue((self.cache / "bin/mermaid-ascii").is_file())
+
+    def test_uninstall_keeps_the_cache_while_a_catalog_from_another_source_remains(self):
+        self.install()
+        self.claude_state.mkdir()
+        (self.claude_state / "list").write_text(
+            '[{"name": "harrison-blair", "source": "github", "repo": "Harrison-Blair/agents"}]\n')
+        self.run_setup("--uninstall")
+        self.assertTrue((self.cache / "bin/mermaid-ascii").is_file())
+
+    def test_uninstall_keeps_the_plugin_and_the_cache_when_python_fails(self):
+        self.run_setup()
+        self.install()
+        # A python3 that is there and cannot start, as the Windows Store alias.
+        python = self.base / "bin/python3"
+        python.write_text("#!/bin/sh\necho 'Python was not found' >&2\nexit 49\n")
+        python.chmod(0o755)
+        result = self.run_setup("--uninstall")
+        self.assertIn("warn: could not read the Claude Code catalogs", result.stderr)
+        self.assertNotIn("plugin uninstall hb@harrison-blair --prune -y", self.claude_calls())
+        self.assertTrue((self.claude_state / "list").exists())
+        self.assertTrue((self.cache / "bin/mermaid-ascii").is_file())
+
+    def test_uninstall_without_claude_removes_the_cache(self):
+        self.install()
+        self.hide_claude()
+        self.run_setup("--uninstall")
+        self.assertFalse(self.cache.exists())
 
 
 if __name__ == "__main__":
