@@ -1,0 +1,20 @@
+{
+  "name": "harrison-blair",
+  "interface": {
+    "displayName": "Harrison Blair"
+  },
+  "plugins": [
+    {
+      "name": "hb",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
