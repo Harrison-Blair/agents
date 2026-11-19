@@ -8,7 +8,7 @@
 # the reason.
 set -u
 
-VERSION="1.6.1"
+VERSION="1.6.2"
 URL="https://github.com/AlexanderGrooff/mermaid-ascii/releases/download/$VERSION"
 CACHE="$HOME/.cache/mermaid-render"
 # A cache directory without this marker is not ours and is not changed.
